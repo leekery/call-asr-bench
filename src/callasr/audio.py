@@ -10,6 +10,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.signal import resample_poly
 
 from callasr.codecs.g711 import Codec, decode_g711, encode_g711
+from callasr.impairments import apply_packet_loss
 
 TELEPHONE_SAMPLE_RATE = 8_000
 
@@ -59,10 +60,24 @@ def resample(audio: AudioBuffer, target_sample_rate: int) -> AudioBuffer:
     return AudioBuffer(converted, target_sample_rate)
 
 
-def telephone_channel(audio: AudioBuffer, codec: Codec = "pcmu") -> AudioBuffer:
-    """Apply 8 kHz resampling and a G.711 encode/decode round trip."""
+def telephone_channel(
+    audio: AudioBuffer,
+    codec: Codec = "pcmu",
+    *,
+    packet_loss_rate: float = 0.0,
+    frame_duration_ms: int = 20,
+    seed: int = 0,
+) -> AudioBuffer:
+    """Apply 8 kHz G.711 transport with optional deterministic packet loss."""
 
     downsampled = resample(audio, TELEPHONE_SAMPLE_RATE)
     payload = encode_g711(downsampled.samples, codec)
+    payload = apply_packet_loss(
+        payload,
+        codec=codec,
+        loss_rate=packet_loss_rate,
+        frame_duration_ms=frame_duration_ms,
+        seed=seed,
+    )
     decoded = decode_g711(payload, codec)
     return AudioBuffer(decoded, TELEPHONE_SAMPLE_RATE)

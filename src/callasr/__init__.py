@@ -2,10 +2,12 @@
 
 from callasr.audio import AudioBuffer, resample, telephone_channel
 from callasr.codecs.g711 import decode_g711, encode_g711
+from callasr.impairments import apply_packet_loss
 from callasr.metrics.wer import normalize_text, word_error_rate
 
 __all__ = [
     "AudioBuffer",
+    "apply_packet_loss",
     "decode_g711",
     "encode_g711",
     "normalize_text",

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from callasr import AudioBuffer, decode_g711, encode_g711, resample, telephone_channel
 
@@ -34,6 +35,30 @@ def test_telephone_channel_is_deterministic() -> None:
     second = telephone_channel(source, codec="pcmu")
 
     np.testing.assert_array_equal(first.samples, second.samples)
+
+
+def test_zero_packet_loss_preserves_default_channel_output() -> None:
+    source = _speech_like_audio()
+
+    default = telephone_channel(source, codec="pcmu")
+    explicit = telephone_channel(source, codec="pcmu", packet_loss_rate=0.0, seed=42)
+
+    np.testing.assert_array_equal(explicit.samples, default.samples)
+
+
+@pytest.mark.parametrize(("codec", "silence_byte"), [("pcmu", 0xFF), ("pcma", 0xD5)])
+def test_telephone_channel_replaces_lost_packets_with_codec_silence(
+    codec: str, silence_byte: int
+) -> None:
+    source = _speech_like_audio()
+    expected_sample = decode_g711(np.array([silence_byte], dtype=np.uint8), codec=codec)[0]
+
+    result = telephone_channel(source, codec=codec, packet_loss_rate=1.0)
+
+    np.testing.assert_array_equal(
+        result.samples,
+        np.full(result.samples.shape, expected_sample, dtype=np.float32),
+    )
 
 
 def test_pcmu_and_pcma_produce_distinct_channel_signals() -> None:
