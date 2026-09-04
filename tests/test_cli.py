@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from callasr.adapters.base import AdapterError
+from callasr.adapters.base import AdapterError, Transcription
 from callasr.benchmark import (
     AdapterInfo,
     BenchmarkResult,
@@ -57,10 +59,18 @@ def _result() -> BenchmarkResult:
     )
 
 
-def _argv(output: Path) -> list[str]:
+def _write_wav(path: Path) -> None:
+    with wave.open(str(path), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(8_000)
+        writer.writeframes(np.zeros(800, dtype="<i2").tobytes())
+
+
+def _argv(output: Path, manifest: str = "dataset.jsonl") -> list[str]:
     return [
         "run",
-        "dataset.jsonl",
+        manifest,
         "--adapter",
         "faster-whisper",
         "--model",
@@ -82,46 +92,67 @@ def _argv(output: Path) -> list[str]:
     ]
 
 
-def test_run_constructs_adapter_runs_benchmark_and_writes_utf8_json(
+def test_run_uses_temp_manifest_real_runner_and_writes_utf8_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     from callasr import cli
 
+    audio_path = tmp_path / "call-1.wav"
+    _write_wav(audio_path)
+    manifest = tmp_path / "dataset.jsonl"
+    manifest.write_text(
+        json.dumps(
+            {
+                "id": "call-1",
+                "audio": audio_path.name,
+                "reference": "добрый день",
+                "language": "ru",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     seen: dict[str, object] = {}
 
     class FakeAdapter:
-        pass
+        name = "faster-whisper"
 
-    def make_adapter(model: str, *, device: str, compute_type: str) -> FakeAdapter:
-        seen["adapter"] = (model, device, compute_type)
-        return FakeAdapter()
+        def __init__(self, model: str, *, device: str, compute_type: str) -> None:
+            self.model = model
+            self.device = device
+            self.compute_type = compute_type
+            seen["adapter"] = (model, device, compute_type)
 
-    def run(manifest: str, adapter: FakeAdapter, **kwargs: object) -> BenchmarkResult:
-        seen["run"] = (manifest, adapter, kwargs)
-        return _result()
+        @property
+        def decoding_options(self) -> dict[str, int | float]:
+            return {"beam_size": 5, "temperature": 0.0}
 
-    monkeypatch.setattr(cli, "FasterWhisperAdapter", make_adapter)
-    monkeypatch.setattr(cli, "run_benchmark", run)
+        def transcribe(self, audio, language: str | None = None) -> Transcription:
+            seen["transcribe"] = (audio.sample_rate, language)
+            return Transcription("добрый день")
+
+    monkeypatch.setattr(cli, "FasterWhisperAdapter", FakeAdapter)
     output = tmp_path / "nested" / "result.json"
 
-    assert cli.main(_argv(output)) == 0
+    assert cli.main(_argv(output, str(manifest))) == 0
 
     assert seen["adapter"] == ("large-v3", "cuda", "float16")
-    manifest, _, kwargs = seen["run"]
-    assert manifest == "dataset.jsonl"
-    assert kwargs == {
-        "codec": "pcmu",
-        "packet_loss_rate": 0.05,
-        "frame_duration_ms": 20,
-        "seed": 42,
-    }
+    assert seen["transcribe"] == (8_000, "ru")
     raw = output.read_text(encoding="utf-8")
     assert "добрый день" in raw
     assert "\\u0434" not in raw
     assert raw.startswith("{\n  ")
     payload = json.loads(raw)
     assert payload["schema_version"] == 1
+    assert payload["channel"] == {
+        "codec": "pcmu",
+        "packet_loss_rate": 0.05,
+        "frame_duration_ms": 20,
+        "seed": 42,
+    }
+    assert payload["items"][0]["audio"] == "call-1.wav"
     assert payload["items"][0]["language"] == "ru"
 
 
