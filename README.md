@@ -7,31 +7,175 @@ Reproducible speech-to-text benchmarks for the audio that real phone calls
 actually deliver.
 
 Most ASR leaderboards use clean, wideband recordings and report one aggregate
-WER. Voice agents receive 8 kHz companded audio and also care about latency,
-partial-result stability, numbers, names, and concurrent calls.
-`call-asr-bench` is being built around that gap.
+WER. Voice agents often receive 8 kHz G.711 audio, so model quality can change
+once the same utterances pass through a telephone channel. `call-asr-bench`
+provides a small local workflow for comparing that clean and telephone-channel
+behavior with reproducible inputs and a versioned JSON result artifact.
 
 ## What works today
 
-The first release provides a deterministic benchmark foundation:
+The end-to-end local runner supports:
 
-- polyphase conversion from arbitrary sample rates to 8 kHz;
-- ITU-T G.711 PCMU (μ-law) and PCMA (A-law) encode/decode;
-- a composed telephone-channel transform;
+- strict UTF-8 JSONL dataset manifests with relative WAV paths;
+- uncompressed mono integer-PCM WAV loading;
+- clean-audio runs and deterministic 8 kHz G.711 PCMU / PCMA runs;
 - deterministic frame-level packet loss with codec-correct silence substitution;
-- Unicode-aware WER for Russian and English transcripts;
-- fixed codec vectors and deterministic tests.
+- a model-agnostic ASR adapter boundary and a local `faster-whisper` adapter;
+- per-utterance and corpus WER / CER;
+- measured adapter time, real-time factor (RTF), and speed factor;
+- the `callasr run` CLI;
+- atomic schema-versioned JSON artifacts.
 
-Jitter, model adapters, streaming latency, datasets, and the leaderboard are
-roadmap items, not simulated results presented as finished features.
+## Install
 
-## Quick start
+Clone the repository and install the `faster-whisper` optional extra:
 
 ```bash
 git clone https://github.com/leekery/call-asr-bench.git
 cd call-asr-bench
-uv sync --extra dev
+uv sync --extra faster-whisper
 ```
+
+The examples below use `uv run callasr` so activating the virtual environment is
+not required. The installed console entry point itself is `callasr`.
+
+## Prepare a dataset
+
+Create a UTF-8 JSONL manifest with one utterance per line. Audio paths are
+resolved relative to the manifest file:
+
+```json
+{"id":"call-001","audio":"audio/call-001.wav","reference":"добрый день","language":"ru"}
+{"id":"call-002","audio":"audio/call-002.wav","reference":"your order is ready","language":"en"}
+```
+
+The fields are:
+
+- `id`: non-empty string, unique inside the manifest;
+- `audio`: non-empty path to an existing WAV file;
+- `reference`: reference transcript; an empty string is valid;
+- `language`: optional lowercase ISO 639-1 code such as `ru` or `en`.
+
+Unknown fields are rejected. Blank lines are allowed. WAV input must be
+uncompressed, mono, integer PCM. The benchmark loader keeps the source sample
+rate; model-specific resampling belongs to the adapter. The `faster-whisper`
+adapter converts its input to 16 kHz internally.
+
+A minimal directory can look like this:
+
+```text
+dataset/
+├── dataset.jsonl
+└── audio/
+    ├── call-001.wav
+    └── call-002.wav
+```
+
+## Run a clean baseline
+
+Use `--codec none` for the source audio without the G.711 telephone transform:
+
+```bash
+uv run callasr run dataset/dataset.jsonl \
+  --adapter faster-whisper \
+  --model large-v3 \
+  --codec none \
+  --output runs/large-v3-clean.json
+```
+
+Packet loss must be zero when `--codec none` is selected. Zero is the default,
+so the clean command does not need a packet-loss flag.
+
+`faster-whisper` uses `--device auto` and `--compute-type default` by default.
+They can be overridden explicitly, for example:
+
+```bash
+--device cuda --compute-type float16
+```
+
+## Run a telephone-channel benchmark
+
+The same dataset can be passed through G.711 PCMU before transcription:
+
+```bash
+uv run callasr run dataset/dataset.jsonl \
+  --adapter faster-whisper \
+  --model large-v3 \
+  --codec pcmu \
+  --packet-loss-rate 0.05 \
+  --frame-duration-ms 20 \
+  --seed 42 \
+  --output runs/large-v3-pcmu.json
+```
+
+Use `--codec pcma` for G.711 A-law. Packet loss is applied at encoded-frame
+level. The run-level seed is combined with each manifest position, so repeated
+runs with the same dataset and seed use the same loss masks without applying an
+identical mask to every utterance.
+
+The initial runner is sequential and stops on the first dataset, audio,
+channel, or transcription failure. The requested output is replaced only after
+every item succeeds. A failed run does not leave a partial result that looks
+like a complete benchmark artifact.
+
+## Result artifact
+
+Successful runs produce UTF-8 JSON with `schema_version` set to `1`. The main
+sections are:
+
+- `dataset`: resolved manifest path and item count;
+- `adapter`: adapter name, model identifier, device, compute type, and decoding
+  options;
+- `channel`: codec, packet-loss rate, frame duration, and run seed;
+- `summary`: corpus audio time, measured adapter time, WER, CER, RTF, and speed
+  factor;
+- `items`: ordered per-utterance references, hypotheses, language tags,
+  durations, timings, WER, and CER.
+
+Item audio paths are stored relative to the manifest when possible. JSON is
+pretty-printed with two-space indentation and preserves non-ASCII text rather
+than escaping Russian or other Unicode transcripts.
+
+### Metrics
+
+**WER** is normalized word-level edit distance. Corpus WER is micro-averaged
+from total word edits and total reference words rather than averaging each
+utterance's WER equally.
+
+**CER** is the same idea at character level after the project's text
+normalization; spaces are removed for the character comparison.
+
+**RTF** is:
+
+```text
+RTF = total adapter seconds / total input-audio seconds
+```
+
+Only the adapter call is timed. WAV loading, telephone-channel processing, and
+JSON serialization are excluded. Lower RTF is faster.
+
+**speed factor** is the reciprocal view:
+
+```text
+speed factor = total input-audio seconds / total adapter seconds
+```
+
+A speed factor of `10` means the measured adapter processed audio at roughly 10x
+real time for that run. It is `null` if the measured adapter time is zero.
+
+## Errors and output safety
+
+Expected dataset, audio, adapter, configuration, and artifact-write errors are
+printed as a concise stderr message and return exit status `2`. Unexpected
+exceptions are not converted into user errors, so developer defects retain a
+normal traceback.
+
+Artifact writing uses a temporary file in the destination directory followed
+by an atomic replace. Parent directories are created when necessary.
+
+## Lower-level Python API
+
+The telephone-audio primitives remain available independently of the CLI:
 
 ```python
 import numpy as np
@@ -59,45 +203,41 @@ print(phone_audio.sample_rate)  # 8000
 print(score)  # 0.2
 ```
 
-Both `pcmu` and `pcma` are supported. With the same input and seed, packet-loss
-simulation is reproducible. A zero loss rate preserves the original telephone
-channel behavior. Inputs are mono floating-point waveforms; codec payloads are
-exposed as `numpy.uint8` arrays when lower-level control is needed:
+## v0.2 limitations
 
-```python
-from callasr import apply_packet_loss, decode_g711, encode_g711, resample
+The current milestone intentionally stays small. It does not provide:
 
-telephone_audio = resample(source, target_sample_rate=8_000)
-payload = encode_g711(telephone_audio.samples, codec="pcma")
-impaired = apply_packet_loss(
-    payload,
-    codec="pcma",
-    loss_rate=0.05,
-    frame_duration_ms=20,
-    seed=42,
-)
-decoded = decode_g711(impaired, codec="pcma")
-```
+- streaming partial-result metrics;
+- jitter or additive-noise simulation;
+- concurrent-call benchmarks;
+- remote ASR API adapters;
+- GigaAM integration;
+- automatic dataset downloading;
+- a hosted leaderboard.
+
+These are follow-up areas after the local runner and artifact contract are
+stable.
 
 ## Development
 
 ```bash
-uv run --extra dev pytest -v
-uv run --extra dev ruff check .
-uv run --extra dev ruff format --check .
+uv sync --extra dev
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest -v
 ```
 
 The package supports Python 3.10 through 3.13.
 
 ## Roadmap
 
-1. A benchmark manifest and CLI with reproducible run artifacts.
-2. Jitter, noise, and configurable telephone channel profiles.
-3. Adapters for local models and OpenAI-compatible ASR endpoints.
-4. Streaming metrics: time to first partial, finalization latency, and partial
+1. Additional telephone-channel profiles: jitter, noise, and related
+   impairments.
+2. More local and OpenAI-compatible ASR adapters.
+3. Streaming metrics: time to first partial, finalization latency, and partial
    transcript stability.
-5. Accuracy slices for numbers, names, addresses, Russian, and English.
-6. Concurrency runs and a comparable public leaderboard format.
+4. Accuracy slices for numbers, names, addresses, Russian, and English.
+5. Concurrency runs and a comparable public leaderboard format.
 
 ## License
 
