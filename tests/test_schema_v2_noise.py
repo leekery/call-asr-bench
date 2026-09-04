@@ -259,8 +259,7 @@ def test_cli_rejects_non_finite_snr(
                 "faster-whisper",
                 "--model",
                 "large-v3",
-                "--snr-db",
-                value,
+                f"--snr-db={value}",
                 "--output",
                 str(tmp_path / "result.json"),
             ]
