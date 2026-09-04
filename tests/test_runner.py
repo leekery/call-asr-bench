@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -16,7 +17,7 @@ class FakeAdapter:
     model = "fake-model"
     device = "cpu"
     compute_type = "float32"
-    decoding_options = {"beam_size": 1}
+    decoding_options: ClassVar[dict[str, int]] = {"beam_size": 1}
 
     def __init__(self, outputs: list[str | Exception]) -> None:
         self.outputs = iter(outputs)
