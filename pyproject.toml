@@ -34,6 +34,9 @@ faster-whisper = [
     "faster-whisper>=1.2,<2",
 ]
 
+[project.scripts]
+callasr = "callasr.cli:main"
+
 [project.urls]
 Repository = "https://github.com/leekery/call-asr-bench"
 Issues = "https://github.com/leekery/call-asr-bench/issues"
