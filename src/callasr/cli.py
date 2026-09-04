@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 from collections.abc import Sequence
+from math import isfinite
 from pathlib import Path
 
 from callasr.adapters.base import AdapterError
@@ -32,6 +33,13 @@ def _probability(value: str) -> float:
     return parsed
 
 
+def _finite_float(value: str) -> float:
+    parsed = float(value)
+    if not isfinite(parsed):
+        raise argparse.ArgumentTypeError("must be finite")
+    return parsed
+
+
 def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed <= 0:
@@ -47,7 +55,7 @@ def _non_negative_int(value: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the public v0.2 command-line parser."""
+    """Build the public command-line parser."""
 
     parser = argparse.ArgumentParser(prog="callasr")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -59,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--codec", choices=("none", "pcmu", "pcma"), default="none")
     run.add_argument("--packet-loss-rate", type=_probability, default=0.0)
     run.add_argument("--frame-duration-ms", type=_positive_int, default=20)
+    run.add_argument("--snr-db", type=_finite_float)
     run.add_argument("--seed", type=_non_negative_int, default=0)
     run.add_argument("--output", required=True)
     run.add_argument("--device", default="auto")
@@ -123,6 +132,7 @@ def _run(args: argparse.Namespace) -> int:
         codec=args.codec,
         packet_loss_rate=args.packet_loss_rate,
         frame_duration_ms=args.frame_duration_ms,
+        snr_db=args.snr_db,
         seed=args.seed,
     )
     write_result_artifact(result, args.output)
