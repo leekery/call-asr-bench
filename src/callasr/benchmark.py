@@ -1,9 +1,20 @@
-"""Benchmark result schema shared by the runner and CLI."""
+"""Benchmark result schema and sequential runner."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from time import perf_counter
 from typing import Literal
+
+import numpy as np
+
+from callasr.adapters.base import ASRAdapter
+from callasr.audio import telephone_channel
+from callasr.dataset import load_dataset_manifest
+from callasr.io import load_wav
+from callasr.metrics.wer import character_error_counts, micro_average, word_error_counts
 
 JsonScalar = str | int | float | bool | None
 
@@ -71,3 +82,103 @@ def result_to_dict(result: BenchmarkResult) -> dict[str, object]:
     payload = asdict(result)
     payload["items"] = list(payload["items"])
     return payload
+
+
+def _packet_loss_seed(run_seed: int, item_index: int) -> int:
+    sequence = np.random.SeedSequence([run_seed, item_index])
+    return int(sequence.generate_state(1, dtype=np.uint32)[0])
+
+
+def _artifact_audio_path(audio_path: Path, manifest_path: Path) -> str:
+    try:
+        return str(audio_path.relative_to(manifest_path.parent))
+    except ValueError:
+        return str(audio_path)
+
+
+def run_benchmark(
+    manifest_path: str | Path,
+    adapter: ASRAdapter,
+    *,
+    codec: Literal["none", "pcmu", "pcma"] = "none",
+    packet_loss_rate: float = 0.0,
+    frame_duration_ms: int = 20,
+    seed: int = 0,
+) -> BenchmarkResult:
+    """Run a validated dataset sequentially through an injected ASR adapter."""
+
+    resolved_manifest = Path(manifest_path).expanduser().resolve()
+    dataset_items = load_dataset_manifest(resolved_manifest)
+    item_results: list[ItemResult] = []
+    word_counts = []
+    character_counts = []
+    total_audio_seconds = 0.0
+    total_adapter_seconds = 0.0
+
+    for item_index, item in enumerate(dataset_items):
+        audio = load_wav(item.audio)
+        if codec != "none":
+            audio = telephone_channel(
+                audio,
+                codec=codec,
+                packet_loss_rate=packet_loss_rate,
+                frame_duration_ms=frame_duration_ms,
+                seed=_packet_loss_seed(seed, item_index),
+            )
+
+        audio_seconds = audio.samples.size / audio.sample_rate
+        started_at = perf_counter()
+        transcription = adapter.transcribe(audio, language=item.language)
+        adapter_seconds = perf_counter() - started_at
+
+        item_word_counts = word_error_counts(item.reference, transcription.text)
+        item_character_counts = character_error_counts(item.reference, transcription.text)
+        word_counts.append(item_word_counts)
+        character_counts.append(item_character_counts)
+        total_audio_seconds += audio_seconds
+        total_adapter_seconds += adapter_seconds
+
+        item_results.append(
+            ItemResult(
+                id=item.id,
+                audio=_artifact_audio_path(item.audio, resolved_manifest),
+                reference=item.reference,
+                hypothesis=transcription.text,
+                language=item.language,
+                audio_seconds=audio_seconds,
+                adapter_seconds=adapter_seconds,
+                wer=item_word_counts.rate,
+                cer=item_character_counts.rate,
+            )
+        )
+
+    rtf = total_adapter_seconds / total_audio_seconds if total_audio_seconds else 0.0
+    speed_factor = (
+        None if total_adapter_seconds == 0.0 else total_audio_seconds / total_adapter_seconds
+    )
+    return BenchmarkResult(
+        created_at=datetime.now(timezone.utc).isoformat(),
+        dataset=DatasetInfo(path=str(resolved_manifest), item_count=len(dataset_items)),
+        adapter=AdapterInfo(
+            name=adapter.name,
+            model=adapter.model,
+            device=adapter.device,
+            compute_type=adapter.compute_type,
+            decoding_options=dict(adapter.decoding_options),
+        ),
+        channel=ChannelInfo(
+            codec=codec,
+            packet_loss_rate=packet_loss_rate,
+            frame_duration_ms=frame_duration_ms,
+            seed=seed,
+        ),
+        summary=BenchmarkSummary(
+            total_audio_seconds=total_audio_seconds,
+            adapter_seconds=total_adapter_seconds,
+            wer=micro_average(word_counts),
+            cer=micro_average(character_counts),
+            rtf=rtf,
+            speed_factor=speed_factor,
+        ),
+        items=tuple(item_results),
+    )
