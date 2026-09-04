@@ -9,8 +9,8 @@ actually deliver.
 Most ASR leaderboards use clean, wideband recordings and report one aggregate
 WER. Voice agents often receive 8 kHz G.711 audio, so model quality can change
 once the same utterances pass through a telephone channel. `call-asr-bench`
-provides a small local workflow for comparing that clean and telephone-channel
-behavior with reproducible inputs and a versioned JSON result artifact.
+provides a small local workflow for comparing clean and impaired audio with
+reproducible inputs and a versioned JSON result artifact.
 
 ## What works today
 
@@ -19,6 +19,7 @@ The end-to-end local runner supports:
 - strict UTF-8 JSONL dataset manifests with relative WAV paths;
 - uncompressed mono integer-PCM WAV loading;
 - clean-audio runs and deterministic 8 kHz G.711 PCMU / PCMA runs;
+- deterministic SNR-controlled Gaussian additive noise;
 - deterministic frame-level packet loss with codec-correct silence substitution;
 - a model-agnostic ASR adapter boundary and a local `faster-whisper` adapter;
 - per-utterance and corpus WER / CER;
@@ -93,9 +94,33 @@ They can be overridden explicitly, for example:
 --device cuda --compute-type float16
 ```
 
+## Add deterministic acoustic noise
+
+Use `--snr-db` to add seeded zero-mean Gaussian noise before any telephone codec
+processing. The value is an amplitude signal-to-noise ratio in decibels. Higher
+values are cleaner; `0` means equal signal and noise RMS, and negative finite
+values are allowed.
+
+A noisy clean-audio run is valid:
+
+```bash
+uv run callasr run dataset/dataset.jsonl \
+  --adapter faster-whisper \
+  --model large-v3 \
+  --codec none \
+  --snr-db 15 \
+  --seed 42 \
+  --output runs/large-v3-noisy-clean.json
+```
+
+Omit `--snr-db` to disable additive noise. `nan`, `inf`, and `-inf` are rejected.
+The run seed and manifest position derive an independent deterministic noise
+seed for each utterance.
+
 ## Run a telephone-channel benchmark
 
-The same dataset can be passed through G.711 PCMU before transcription:
+The same dataset can be passed through additive noise and then G.711 PCMU before
+transcription:
 
 ```bash
 uv run callasr run dataset/dataset.jsonl \
@@ -104,33 +129,54 @@ uv run callasr run dataset/dataset.jsonl \
   --codec pcmu \
   --packet-loss-rate 0.05 \
   --frame-duration-ms 20 \
+  --snr-db 15 \
   --seed 42 \
-  --output runs/large-v3-pcmu.json
+  --output runs/large-v3-pcmu-noisy.json
 ```
 
-Use `--codec pcma` for G.711 A-law. Packet loss is applied at encoded-frame
-level. The run-level seed is combined with each manifest position, so repeated
-runs with the same dataset and seed use the same loss masks without applying an
-identical mask to every utterance.
+Use `--codec pcma` for G.711 A-law. The impairment order is fixed:
 
-The initial runner is sequential and stops on the first dataset, audio,
-channel, or transcription failure. The requested output is replaced only after
-every item succeeds. A failed run does not leave a partial result that looks
-like a complete benchmark artifact.
+```text
+source WAV
+→ optional additive noise
+→ G.711 resample / encode
+→ optional frame-level packet loss
+→ G.711 decode
+→ ASR adapter
+```
+
+Packet loss is applied at encoded-frame level. The packet-loss seed derivation
+is unchanged from v0.2: the run-level seed is combined with each manifest
+position, so repeated runs with the same dataset and seed use the same loss
+masks without applying an identical mask to every utterance. Additive noise uses
+a separate deterministic per-item random stream and therefore does not perturb
+the packet-loss sequence.
+
+The runner is sequential and stops on the first dataset, audio, channel, or
+transcription failure. The requested output is replaced only after every item
+succeeds. A failed run does not leave a partial result that looks like a
+complete benchmark artifact.
 
 ## Result artifact
 
-Successful runs produce UTF-8 JSON with `schema_version` set to `1`. The main
+Current `main` writes UTF-8 JSON with `schema_version` set to `2`. The main
 sections are:
 
 - `dataset`: resolved manifest path and item count;
 - `adapter`: adapter name, model identifier, device, compute type, and decoding
   options;
-- `channel`: codec, packet-loss rate, frame duration, and run seed;
+- `channel`: codec, packet-loss rate, frame duration, run seed, and nullable
+  `additive_noise_snr_db`;
 - `summary`: corpus audio time, measured adapter time, WER, CER, RTF, and speed
   factor;
 - `items`: ordered per-utterance references, hypotheses, language tags,
   durations, timings, WER, and CER.
+
+When additive noise is disabled, `channel.additive_noise_snr_db` is `null`.
+
+The published `v0.2.0` tag remains the schema-version-1 release. Schema version
+2 is the current unreleased development contract on `main`; the old release and
+its artifacts are not rewritten.
 
 Item audio paths are stored relative to the manifest when possible. JSON is
 pretty-printed with two-space indentation and preserves non-ASCII text rather
@@ -151,8 +197,8 @@ normalization; spaces are removed for the character comparison.
 RTF = total adapter seconds / total input-audio seconds
 ```
 
-Only the adapter call is timed. WAV loading, telephone-channel processing, and
-JSON serialization are excluded. Lower RTF is faster.
+Only the adapter call is timed. WAV loading, impairment processing, and JSON
+serialization are excluded. Lower RTF is faster.
 
 **speed factor** is the reciprocal view:
 
@@ -175,20 +221,21 @@ by an atomic replace. Parent directories are created when necessary.
 
 ## Lower-level Python API
 
-The telephone-audio primitives remain available independently of the CLI:
+The audio primitives remain available independently of the CLI:
 
 ```python
 import numpy as np
 
-from callasr import AudioBuffer, telephone_channel, word_error_rate
+from callasr import AudioBuffer, apply_additive_noise, telephone_channel, word_error_rate
 
 source = AudioBuffer(
-    samples=np.zeros(16_000, dtype=np.float32),
+    samples=np.full(16_000, 0.1, dtype=np.float32),
     sample_rate=16_000,
 )
 
+noisy = apply_additive_noise(source, snr_db=15.0, seed=42)
 phone_audio = telephone_channel(
-    source,
+    noisy,
     codec="pcmu",
     packet_loss_rate=0.05,
     frame_duration_ms=20,
@@ -203,19 +250,19 @@ print(phone_audio.sample_rate)  # 8000
 print(score)  # 0.2
 ```
 
-## v0.2 limitations
+## Current development limitations
 
-The current milestone intentionally stays small. It does not provide:
+The current local runner does not provide:
 
 - streaming partial-result metrics;
-- jitter or additive-noise simulation;
+- jitter simulation or richer channel profiles;
 - concurrent-call benchmarks;
 - remote ASR API adapters;
 - GigaAM integration;
 - automatic dataset downloading;
 - a hosted leaderboard.
 
-These are follow-up areas after the local runner and artifact contract are
+These remain follow-up areas after the local runner and artifact contract are
 stable.
 
 ## Development
@@ -231,8 +278,7 @@ The package supports Python 3.10 through 3.13.
 
 ## Roadmap
 
-1. Additional telephone-channel profiles: jitter, noise, and related
-   impairments.
+1. Additional telephone-channel profiles: jitter and related impairments.
 2. More local and OpenAI-compatible ASR adapters.
 3. Streaming metrics: time to first partial, finalization latency, and partial
    transcript stability.
