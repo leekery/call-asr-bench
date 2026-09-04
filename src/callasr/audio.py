@@ -1,9 +1,10 @@
-"""Audio containers and deterministic sample-rate conversion."""
+"""Audio containers, deterministic resampling, and waveform impairments."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from math import gcd
+from numbers import Integral, Real
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -58,6 +59,31 @@ def resample(audio: AudioBuffer, target_sample_rate: int) -> AudioBuffer:
     down = audio.sample_rate // common_factor
     converted = resample_poly(audio.samples, up, down)
     return AudioBuffer(converted, target_sample_rate)
+
+
+def apply_additive_noise(
+    audio: AudioBuffer,
+    *,
+    snr_db: float,
+    seed: int = 0,
+) -> AudioBuffer:
+    """Add deterministic Gaussian noise at a requested signal-to-noise ratio."""
+
+    if not isinstance(snr_db, Real) or isinstance(snr_db, bool) or not np.isfinite(snr_db):
+        raise ValueError("snr_db must be finite")
+    if not isinstance(seed, Integral) or isinstance(seed, bool) or seed < 0:
+        raise ValueError("seed must be a non-negative integer")
+
+    signal = audio.samples.astype(np.float64)
+    signal_rms = float(np.sqrt(np.mean(np.square(signal))))
+    if signal_rms == 0.0:
+        raise ValueError("cannot define SNR for silent audio")
+
+    raw_noise = np.random.default_rng(int(seed)).standard_normal(signal.size)
+    raw_noise_rms = float(np.sqrt(np.mean(np.square(raw_noise))))
+    target_noise_rms = signal_rms * (10.0 ** (-float(snr_db) / 20.0))
+    noise = raw_noise * (target_noise_rms / raw_noise_rms)
+    return AudioBuffer(signal + noise, audio.sample_rate)
 
 
 def telephone_channel(
