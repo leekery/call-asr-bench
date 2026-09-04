@@ -11,7 +11,7 @@ from typing import Literal
 import numpy as np
 
 from callasr.adapters.base import ASRAdapter
-from callasr.audio import telephone_channel
+from callasr.audio import apply_additive_noise, telephone_channel
 from callasr.dataset import load_dataset_manifest
 from callasr.io import load_wav
 from callasr.metrics.wer import character_error_counts, micro_average, word_error_counts
@@ -40,6 +40,7 @@ class ChannelInfo:
     packet_loss_rate: float
     frame_duration_ms: int
     seed: int
+    additive_noise_snr_db: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +68,7 @@ class ItemResult:
 
 @dataclass(frozen=True, slots=True)
 class BenchmarkResult:
-    schema_version: int = field(default=1, init=False)
+    schema_version: int = field(default=2, init=False)
     created_at: str
     dataset: DatasetInfo
     adapter: AdapterInfo
@@ -89,6 +90,11 @@ def _packet_loss_seed(run_seed: int, item_index: int) -> int:
     return int(sequence.generate_state(1, dtype=np.uint32)[0])
 
 
+def _additive_noise_seed(run_seed: int, item_index: int) -> int:
+    sequence = np.random.SeedSequence([run_seed, item_index, 1])
+    return int(sequence.generate_state(1, dtype=np.uint32)[0])
+
+
 def _artifact_audio_path(audio_path: Path, manifest_path: Path) -> str:
     try:
         return str(audio_path.relative_to(manifest_path.parent))
@@ -103,6 +109,7 @@ def run_benchmark(
     codec: Literal["none", "pcmu", "pcma"] = "none",
     packet_loss_rate: float = 0.0,
     frame_duration_ms: int = 20,
+    snr_db: float | None = None,
     seed: int = 0,
 ) -> BenchmarkResult:
     """Run a validated dataset sequentially through an injected ASR adapter."""
@@ -117,6 +124,12 @@ def run_benchmark(
 
     for item_index, item in enumerate(dataset_items):
         audio = load_wav(item.audio)
+        if snr_db is not None:
+            audio = apply_additive_noise(
+                audio,
+                snr_db=snr_db,
+                seed=_additive_noise_seed(seed, item_index),
+            )
         if codec != "none":
             audio = telephone_channel(
                 audio,
@@ -171,6 +184,7 @@ def run_benchmark(
             packet_loss_rate=packet_loss_rate,
             frame_duration_ms=frame_duration_ms,
             seed=seed,
+            additive_noise_snr_db=snr_db,
         ),
         summary=BenchmarkSummary(
             total_audio_seconds=total_audio_seconds,
