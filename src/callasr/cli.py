@@ -11,8 +11,9 @@ from collections.abc import Sequence
 from math import isfinite
 from pathlib import Path
 
-from callasr.adapters.base import AdapterError
+from callasr.adapters.base import AdapterError, ASRAdapter
 from callasr.adapters.faster_whisper import FasterWhisperAdapter
+from callasr.adapters.openai_compatible import OpenAICompatibleAdapter
 from callasr.benchmark import BenchmarkResult, result_to_dict, run_benchmark
 from callasr.dataset import DatasetError
 from callasr.io import AudioError
@@ -47,6 +48,13 @@ def _non_negative_float(value: str) -> float:
     return parsed
 
 
+def _positive_float(value: str) -> float:
+    parsed = _finite_float(value)
+    if parsed <= 0.0:
+        raise argparse.ArgumentTypeError("must be a positive number")
+    return parsed
+
+
 def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed <= 0:
@@ -69,7 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = subparsers.add_parser("run", help="run a sequential ASR benchmark")
     run.add_argument("manifest")
-    run.add_argument("--adapter", choices=("faster-whisper",), required=True)
+    run.add_argument(
+        "--adapter",
+        choices=("faster-whisper", "openai-compatible"),
+        required=True,
+    )
     run.add_argument("--model", required=True)
     run.add_argument("--codec", choices=("none", "pcmu", "pcma"), default="none")
     run.add_argument("--packet-loss-rate", type=_probability, default=0.0)
@@ -81,6 +93,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--output", required=True)
     run.add_argument("--device", default="auto")
     run.add_argument("--compute-type", default="default")
+    run.add_argument("--base-url")
+    run.add_argument("--api-key")
+    run.add_argument("--timeout-seconds", type=_positive_float, default=60.0)
     return parser
 
 
@@ -92,13 +107,38 @@ def _validate_configuration(args: argparse.Namespace) -> None:
     if args.jitter_std_ms is not None and args.codec == "none":
         raise ConfigurationError("jitter requires codec pcmu or pcma")
 
+    if args.adapter == "openai-compatible":
+        if args.base_url is None:
+            raise ConfigurationError("base-url is required with adapter openai-compatible")
+    elif (
+        args.base_url is not None
+        or args.api_key is not None
+        or args.timeout_seconds != 60.0
+    ):
+        raise ConfigurationError(
+            "base-url, api-key, and non-default timeout-seconds are only valid with adapter "
+            "openai-compatible"
+        )
 
-def _build_adapter(args: argparse.Namespace) -> FasterWhisperAdapter:
+
+def _build_adapter(args: argparse.Namespace) -> ASRAdapter:
     if args.adapter == "faster-whisper":
         return FasterWhisperAdapter(
             args.model,
             device=args.device,
             compute_type=args.compute_type,
+        )
+    if args.adapter == "openai-compatible":
+        api_key = args.api_key
+        if api_key is None:
+            api_key = os.environ.get("CALLASR_API_KEY")
+        if api_key is None:
+            api_key = os.environ.get("OPENAI_API_KEY")
+        return OpenAICompatibleAdapter(
+            args.model,
+            base_url=args.base_url,
+            api_key=api_key,
+            timeout_seconds=args.timeout_seconds,
         )
     raise ConfigurationError(f"unsupported adapter: {args.adapter}")
 
