@@ -1,6 +1,12 @@
 """Public API for call-asr-bench."""
 
-from callasr.audio import AudioBuffer, apply_additive_noise, resample, telephone_channel
+from callasr.audio import (
+    AudioBuffer,
+    apply_additive_noise,
+    apply_gain_and_clip,
+    resample,
+    telephone_channel,
+)
 from callasr.codecs.g711 import decode_g711, encode_g711
 from callasr.impairments import apply_jitter_loss, apply_packet_loss
 from callasr.metrics.wer import (
@@ -17,6 +23,7 @@ __all__ = [
     "AudioBuffer",
     "ErrorCounts",
     "apply_additive_noise",
+    "apply_gain_and_clip",
     "apply_jitter_loss",
     "apply_packet_loss",
     "character_error_counts",
