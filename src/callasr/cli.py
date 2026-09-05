@@ -17,6 +17,7 @@ from callasr.adapters.openai_compatible import OpenAICompatibleAdapter
 from callasr.benchmark import BenchmarkResult, result_to_dict, run_benchmark
 from callasr.dataset import DatasetError
 from callasr.io import AudioError
+from callasr.report import ComparisonError, compare_result_artifacts
 
 
 class ConfigurationError(ValueError):
@@ -96,6 +97,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--base-url")
     run.add_argument("--api-key")
     run.add_argument("--timeout-seconds", type=_positive_float, default=60.0)
+
+    compare = subparsers.add_parser("compare", help="compare saved benchmark artifacts")
+    compare.add_argument("results", nargs="+")
     return parser
 
 
@@ -190,6 +194,11 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _compare(args: argparse.Namespace) -> int:
+    print(compare_result_artifacts(args.results))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface and return a process exit status."""
 
@@ -197,7 +206,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "run":
             return _run(args)
-    except (DatasetError, AudioError, AdapterError, ConfigurationError, ArtifactError) as exc:
+        if args.command == "compare":
+            return _compare(args)
+    except (
+        DatasetError,
+        AudioError,
+        AdapterError,
+        ConfigurationError,
+        ArtifactError,
+        ComparisonError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     raise AssertionError(f"unhandled command: {args.command}")
