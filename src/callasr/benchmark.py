@@ -152,16 +152,26 @@ def run_benchmark(
                 seed=_additive_noise_seed(seed, item_index),
             )
         if codec != "none":
-            audio = telephone_channel(
-                audio,
-                codec=codec,
-                packet_loss_rate=packet_loss_rate,
-                frame_duration_ms=frame_duration_ms,
-                seed=_packet_loss_seed(seed, item_index),
-                jitter_std_ms=jitter_std_ms,
-                playout_buffer_ms=playout_buffer_ms,
-                jitter_seed=_jitter_seed(seed, item_index),
-            )
+            packet_seed = _packet_loss_seed(seed, item_index)
+            if jitter_std_ms is None:
+                audio = telephone_channel(
+                    audio,
+                    codec=codec,
+                    packet_loss_rate=packet_loss_rate,
+                    frame_duration_ms=frame_duration_ms,
+                    seed=packet_seed,
+                )
+            else:
+                audio = telephone_channel(
+                    audio,
+                    codec=codec,
+                    packet_loss_rate=packet_loss_rate,
+                    frame_duration_ms=frame_duration_ms,
+                    seed=packet_seed,
+                    jitter_std_ms=jitter_std_ms,
+                    playout_buffer_ms=playout_buffer_ms,
+                    jitter_seed=_jitter_seed(seed, item_index),
+                )
 
         audio_seconds = audio.samples.size / audio.sample_rate
         started_at = perf_counter()
