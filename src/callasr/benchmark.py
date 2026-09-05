@@ -14,6 +14,7 @@ from callasr.adapters.base import ASRAdapter
 from callasr.audio import apply_additive_noise, telephone_channel
 from callasr.dataset import load_dataset_manifest
 from callasr.io import load_wav
+from callasr.metrics.entities import NumericEntityScore, score_numeric_entities
 from callasr.metrics.wer import character_error_counts, micro_average, word_error_counts
 
 JsonScalar = str | int | float | bool | None
@@ -53,6 +54,9 @@ class BenchmarkSummary:
     cer: float
     rtf: float
     speed_factor: float | None
+    numeric_entity_matches: int = 0
+    numeric_entity_reference_count: int = 0
+    numeric_entity_accuracy: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,11 +70,12 @@ class ItemResult:
     adapter_seconds: float
     wer: float
     cer: float
+    numeric_entities: NumericEntityScore | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class BenchmarkResult:
-    schema_version: int = field(default=3, init=False)
+    schema_version: int = field(default=4, init=False)
     created_at: str
     dataset: DatasetInfo
     adapter: AdapterInfo
@@ -142,6 +147,8 @@ def run_benchmark(
     character_counts = []
     total_audio_seconds = 0.0
     total_adapter_seconds = 0.0
+    numeric_entity_matches = 0
+    numeric_entity_reference_count = 0
 
     for item_index, item in enumerate(dataset_items):
         audio = load_wav(item.audio)
@@ -180,8 +187,11 @@ def run_benchmark(
 
         item_word_counts = word_error_counts(item.reference, transcription.text)
         item_character_counts = character_error_counts(item.reference, transcription.text)
+        numeric_entities = score_numeric_entities(item.reference, transcription.text)
         word_counts.append(item_word_counts)
         character_counts.append(item_character_counts)
+        numeric_entity_matches += numeric_entities.matches
+        numeric_entity_reference_count += numeric_entities.reference_count
         total_audio_seconds += audio_seconds
         total_adapter_seconds += adapter_seconds
 
@@ -196,12 +206,18 @@ def run_benchmark(
                 adapter_seconds=adapter_seconds,
                 wer=item_word_counts.rate,
                 cer=item_character_counts.rate,
+                numeric_entities=numeric_entities,
             )
         )
 
     rtf = total_adapter_seconds / total_audio_seconds if total_audio_seconds else 0.0
     speed_factor = (
         None if total_adapter_seconds == 0.0 else total_audio_seconds / total_adapter_seconds
+    )
+    numeric_entity_accuracy = (
+        None
+        if numeric_entity_reference_count == 0
+        else numeric_entity_matches / numeric_entity_reference_count
     )
     return BenchmarkResult(
         created_at=datetime.now(timezone.utc).isoformat(),
@@ -229,6 +245,9 @@ def run_benchmark(
             cer=micro_average(character_counts),
             rtf=rtf,
             speed_factor=speed_factor,
+            numeric_entity_matches=numeric_entity_matches,
+            numeric_entity_reference_count=numeric_entity_reference_count,
+            numeric_entity_accuracy=numeric_entity_accuracy,
         ),
         items=tuple(item_results),
     )

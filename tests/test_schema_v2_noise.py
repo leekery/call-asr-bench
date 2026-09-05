@@ -93,7 +93,7 @@ def _result(additive_noise_snr_db: float | None) -> BenchmarkResult:
 def test_current_schema_keeps_nullable_additive_noise_metadata() -> None:
     payload = result_to_dict(_result(None))
 
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["channel"]["additive_noise_snr_db"] is None
 
 

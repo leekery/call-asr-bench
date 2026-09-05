@@ -9,6 +9,12 @@ from callasr.audio import (
 )
 from callasr.codecs.g711 import decode_g711, encode_g711
 from callasr.impairments import apply_jitter_loss, apply_packet_loss
+from callasr.metrics.entities import (
+    NumericEntity,
+    NumericEntityScore,
+    extract_numeric_entities,
+    score_numeric_entities,
+)
 from callasr.metrics.wer import (
     ErrorCounts,
     character_error_counts,
@@ -22,6 +28,8 @@ from callasr.metrics.wer import (
 __all__ = [
     "AudioBuffer",
     "ErrorCounts",
+    "NumericEntity",
+    "NumericEntityScore",
     "apply_additive_noise",
     "apply_gain_and_clip",
     "apply_jitter_loss",
@@ -30,9 +38,11 @@ __all__ = [
     "character_error_rate",
     "decode_g711",
     "encode_g711",
+    "extract_numeric_entities",
     "micro_average",
     "normalize_text",
     "resample",
+    "score_numeric_entities",
     "telephone_channel",
     "word_error_counts",
     "word_error_rate",
