@@ -116,15 +116,24 @@ def test_mixed_known_schemas_render_common_metrics_and_optional_fields(tmp_path:
     )
 
     report = compare_result_artifacts([old, current])
-
-    assert report == "\n".join(
-        [
-            "| Artifact | Schema | Adapter | Model | Codec | Loss | SNR dB | Jitter ms | WER | CER | RTF | Speed | Numeric entity | Items |",
-            "| --- | ---: | --- | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-            "| v1.json | 1 | faster-whisper | old-model | pcmu | 0.05 | — | — | 0.1 | 0.05 | 0.2 | 5 | — | 2 |",
-            "| v4.json | 4 | openai-compatible | served-model | pcma | 0.1 | 15 | 8/20 | 0.08 | 0.03 | 0.25 | 4 | 0.75 | 2 |",
-        ]
+    header = (
+        "| Artifact | Schema | Adapter | Model | Codec | Loss | SNR dB | Jitter ms | "
+        "WER | CER | RTF | Speed | Numeric entity | Items |"
     )
+    separator = (
+        "| --- | ---: | --- | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | "
+        "---: | ---: | ---: |"
+    )
+    old_row = (
+        "| v1.json | 1 | faster-whisper | old-model | pcmu | 0.05 | — | — | 0.1 | "
+        "0.05 | 0.2 | 5 | — | 2 |"
+    )
+    current_row = (
+        "| v4.json | 4 | openai-compatible | served-model | pcma | 0.1 | 15 | 8/20 | "
+        "0.08 | 0.03 | 0.25 | 4 | 0.75 | 2 |"
+    )
+
+    assert report == "\n".join([header, separator, old_row, current_row])
 
 
 def test_input_order_is_preserved(tmp_path: Path) -> None:
