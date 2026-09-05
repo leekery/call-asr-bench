@@ -9,12 +9,12 @@ actually deliver.
 Most ASR leaderboards use clean, wideband recordings and report one aggregate
 WER. Voice agents often receive 8 kHz G.711 audio, so model quality can change
 once the same utterances pass through a telephone channel. `call-asr-bench`
-provides a small local workflow for comparing clean and impaired audio with
+provides a small workflow for comparing clean and impaired audio with
 reproducible inputs and a versioned JSON result artifact.
 
 ## What works today
 
-The end-to-end local runner supports:
+The end-to-end runner supports:
 
 - strict UTF-8 JSONL dataset manifests with relative WAV paths;
 - uncompressed mono integer-PCM WAV loading;
@@ -23,7 +23,10 @@ The end-to-end local runner supports:
 - deterministic frame-level packet loss with codec-correct silence substitution;
 - deterministic frame jitter modeled as late G.711 packet loss against a fixed
   playout buffer;
-- a model-agnostic ASR adapter boundary and a local `faster-whisper` adapter;
+- a model-agnostic ASR adapter boundary;
+- local in-process `faster-whisper` inference;
+- OpenAI-compatible `/audio/transcriptions` endpoints, including self-hosted
+  servers such as vLLM;
 - per-utterance and corpus WER / CER;
 - digit-form phone-number and numeric-entity preservation accuracy;
 - measured adapter time, real-time factor (RTF), and speed factor;
@@ -35,12 +38,23 @@ transforms. Gain/clipping is not yet wired into `callasr run`.
 
 ## Install
 
-Clone the repository and install the `faster-whisper` optional extra:
+Clone the repository first:
 
 ```bash
 git clone https://github.com/leekery/call-asr-bench.git
 cd call-asr-bench
+```
+
+For local `faster-whisper` inference, install its optional extra:
+
+```bash
 uv sync --extra faster-whisper
+```
+
+For an OpenAI-compatible HTTP endpoint, install the lightweight HTTP extra:
+
+```bash
+uv sync --extra openai-compatible
 ```
 
 The examples below use `uv run callasr` so activating the virtual environment is
@@ -65,8 +79,8 @@ The fields are:
 
 Unknown fields are rejected. Blank lines are allowed. WAV input must be
 uncompressed, mono, integer PCM. The benchmark loader keeps the source sample
-rate; model-specific resampling belongs to the adapter. The `faster-whisper`
-adapter converts its input to 16 kHz internally.
+rate; model-specific or transport-specific conversion belongs to the adapter.
+The `faster-whisper` adapter converts its input to 16 kHz internally.
 
 A minimal directory can look like this:
 
@@ -78,7 +92,7 @@ dataset/
     └── call-002.wav
 ```
 
-## Run a clean baseline
+## Run a clean local baseline
 
 Use `--codec none` for the source audio without the G.711 telephone transform:
 
@@ -100,6 +114,59 @@ They can be overridden explicitly, for example:
 ```bash
 --device cuda --compute-type float16
 ```
+
+## Benchmark an OpenAI-compatible endpoint
+
+`openai-compatible` targets an API root that already includes its version path,
+for example `http://localhost:8000/v1`. The adapter appends
+`/audio/transcriptions`; it does not guess or add `/v1` itself.
+
+For a local vLLM-style server that does not require authentication:
+
+```bash
+uv run callasr run dataset/dataset.jsonl \
+  --adapter openai-compatible \
+  --model openai/whisper-large-v3-turbo \
+  --base-url http://localhost:8000/v1 \
+  --codec none \
+  --output runs/served-whisper-clean.json
+```
+
+For an authenticated endpoint, prefer an environment variable instead of
+putting the key in shell history:
+
+```bash
+CALLASR_API_KEY=your-secret-key \
+uv run callasr run dataset/dataset.jsonl \
+  --adapter openai-compatible \
+  --model served-asr \
+  --base-url https://asr.example.com/v1 \
+  --timeout-seconds 60 \
+  --output runs/served-asr.json
+```
+
+API-key resolution is deterministic:
+
+1. explicit `--api-key`;
+2. `CALLASR_API_KEY`;
+3. `OPENAI_API_KEY`;
+4. no Authorization header.
+
+The API key is never included in benchmark adapter metadata or result artifacts.
+The base URL is also rejected if it contains URL user credentials, a query
+string, or a fragment, which avoids accidentally persisting credentials through
+the reproducibility metadata.
+
+The HTTP adapter uploads each `AudioBuffer` as an in-memory mono PCM16 WAV at its
+current sample rate. Samples are clipped to `[-1, 1]` at this transport boundary
+before PCM16 conversion. The artifact records `upload_format=wav_pcm16`, the
+non-secret base URL, response format, and timeout so this conversion is visible
+and reproducible.
+
+For a remote adapter, the timed adapter call includes WAV serialization, the HTTP
+round trip, server inference, and response parsing. RTF therefore measures
+observed endpoint latency/throughput from the benchmark client rather than only
+the server's internal model compute time.
 
 ## Add deterministic acoustic noise
 
@@ -127,7 +194,8 @@ seed for each utterance.
 ## Run a telephone-channel benchmark
 
 The same dataset can be passed through additive noise, G.711, packet loss, and
-late-frame jitter before transcription:
+late-frame jitter before transcription. The impairment pipeline is independent
+of which ASR adapter receives the resulting audio.
 
 ```bash
 uv run callasr run dataset/dataset.jsonl \
@@ -235,6 +303,10 @@ original `surface`, and the comparison `canonical` value, plus `matches`,
 `reference_count`, and nullable `accuracy`. A failed phone-number comparison can
 therefore be inspected directly rather than inferred from one aggregate score.
 
+For `openai-compatible`, `adapter.device` is `remote`, `compute_type` is
+`server`, and `decoding_options` contains only non-secret endpoint metadata:
+`base_url`, `response_format`, `upload_format`, and `timeout_seconds`.
+
 Disabled optional impairments are represented by `null` channel fields. Jitter
 parameters are always either both set or both `null`.
 
@@ -265,7 +337,9 @@ RTF = total adapter seconds / total input-audio seconds
 ```
 
 Only the adapter call is timed. WAV loading, impairment processing, metric
-calculation, and JSON serialization are excluded. Lower RTF is faster.
+calculation, and JSON serialization are excluded. Lower RTF is faster. For the
+remote adapter, transport serialization and HTTP/server latency are intentionally
+inside the adapter call and therefore inside RTF.
 
 **speed factor** is the reciprocal view:
 
@@ -279,9 +353,10 @@ real time for that run. It is `null` if the measured adapter time is zero.
 ## Errors and output safety
 
 Expected dataset, audio, adapter, configuration, and artifact-write errors are
-printed as a concise stderr message and return exit status `2`. Unexpected
-exceptions are not converted into user errors, so developer defects retain a
-normal traceback.
+printed as a concise stderr message and return exit status `2`. Remote endpoint
+errors report sanitized status/transport information and do not include response
+bodies or API keys. Unexpected exceptions are not converted into user errors, so
+developer defects retain a normal traceback.
 
 Artifact writing uses a temporary file in the destination directory followed
 by an atomic replace. Parent directories are created when necessary.
@@ -335,22 +410,21 @@ print(entities.accuracy)  # 1.0
 
 ## Current development limitations
 
-The current local runner does not provide:
+The current runner does not provide:
 
 - word-to-digit normalization for spoken numeric forms;
 - critical-entity scoring for names or addresses;
 - gain/clipping configuration through the runner or CLI;
+- provider-specific remote features beyond the common transcription contract;
 - a full RTP/adaptive jitter-buffer, packet reordering, duplication, or
   correlated network-delay simulation;
 - streaming partial-result metrics;
 - concurrent-call benchmarks;
-- remote ASR API adapters;
 - GigaAM integration;
 - automatic dataset downloading;
 - a hosted leaderboard.
 
-These remain follow-up areas after the local runner and artifact contract are
-stable.
+These remain follow-up areas after the runner and artifact contract are stable.
 
 ## Development
 
@@ -361,11 +435,14 @@ uv run ruff format --check .
 uv run pytest -v
 ```
 
-The package supports Python 3.10 through 3.13.
+The package supports Python 3.10 through 3.13. Default CI does not install the
+OpenAI-compatible extra and does not make external transcription requests; HTTP
+behavior is covered with an injected fake client.
 
 ## Roadmap
 
-1. More local and OpenAI-compatible ASR adapters.
+1. More local ASR adapters, including GigaAM Multilingual when its packaging path
+   is stable.
 2. Comparison reports from saved benchmark artifacts.
 3. Example datasets for first-user smoke runs.
 4. Streaming metrics: time to first partial, finalization latency, and partial
