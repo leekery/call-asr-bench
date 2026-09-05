@@ -2,7 +2,7 @@
 
 from callasr.audio import AudioBuffer, apply_additive_noise, resample, telephone_channel
 from callasr.codecs.g711 import decode_g711, encode_g711
-from callasr.impairments import apply_packet_loss
+from callasr.impairments import apply_jitter_loss, apply_packet_loss
 from callasr.metrics.wer import (
     ErrorCounts,
     character_error_counts,
@@ -17,6 +17,7 @@ __all__ = [
     "AudioBuffer",
     "ErrorCounts",
     "apply_additive_noise",
+    "apply_jitter_loss",
     "apply_packet_loss",
     "character_error_counts",
     "character_error_rate",
