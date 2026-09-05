@@ -31,6 +31,7 @@ The end-to-end runner supports:
 - digit-form phone-number and numeric-entity preservation accuracy;
 - measured adapter time, real-time factor (RTF), and speed factor;
 - the `callasr run` CLI;
+- deterministic Markdown comparison of saved schema-v1 through schema-v4 artifacts;
 - atomic schema-versioned JSON artifacts.
 
 The lower-level Python API also includes deterministic gain and hard-clipping
@@ -318,6 +319,37 @@ Item audio paths are stored relative to the manifest when possible. JSON is
 pretty-printed with two-space indentation and preserves non-ASCII text rather
 than escaping Russian or other Unicode transcripts.
 
+## Compare saved result artifacts
+
+Use `callasr compare` to compare completed runs without loading audio or invoking
+any ASR model:
+
+```bash
+uv run callasr compare \
+  runs/large-v3-clean.json \
+  runs/large-v3-pcmu-impaired.json \
+  runs/served-asr.json
+```
+
+The command writes a deterministic Markdown table to stdout. It accepts known
+call-asr-bench schema versions 1 through 4 and keeps the schema version visible
+for every row. WER, CER, RTF, and speed-factor definitions are compatible across
+those schema versions. Fields introduced later are not invented for older
+artifacts: SNR, jitter, or numeric-entity accuracy render as `—` when the source
+schema does not contain them. Numeric zero remains `0`, not `—`.
+
+Rows preserve command-line input order. Model names and artifact filenames are
+escaped so pipes or newlines cannot corrupt the Markdown table. Unknown schema
+versions, malformed fields, unreadable files, and invalid JSON fail with an
+artifact-path-qualified error instead of silently filling defaults.
+
+Current artifacts record the manifest path and item count, but they do **not**
+contain a dataset content fingerprint. Therefore `callasr compare` cannot prove
+that two same-size manifests contain identical samples. The table always shows
+the item count, and users remain responsible for comparing runs produced from
+equivalent datasets. A future result schema can add a dataset fingerprint rather
+than pretending the current artifacts provide one.
+
 ### Metrics
 
 **WER** is normalized word-level edit distance. Corpus WER is micro-averaged
@@ -352,11 +384,11 @@ real time for that run. It is `null` if the measured adapter time is zero.
 
 ## Errors and output safety
 
-Expected dataset, audio, adapter, configuration, and artifact-write errors are
-printed as a concise stderr message and return exit status `2`. Remote endpoint
-errors report sanitized status/transport information and do not include response
-bodies or API keys. Unexpected exceptions are not converted into user errors, so
-developer defects retain a normal traceback.
+Expected dataset, audio, adapter, configuration, artifact-write, and comparison
+errors are printed as a concise stderr message and return exit status `2`. Remote
+endpoint errors report sanitized status/transport information and do not include
+response bodies or API keys. Unexpected exceptions are not converted into user
+errors, so developer defects retain a normal traceback.
 
 Artifact writing uses a temporary file in the destination directory followed
 by an atomic replace. Parent directories are created when necessary.
@@ -412,6 +444,7 @@ print(entities.accuracy)  # 1.0
 
 The current runner does not provide:
 
+- dataset content fingerprints for automatic cross-run identity checks;
 - word-to-digit normalization for spoken numeric forms;
 - critical-entity scoring for names or addresses;
 - gain/clipping configuration through the runner or CLI;
@@ -443,13 +476,12 @@ behavior is covered with an injected fake client.
 
 1. More local ASR adapters, including GigaAM Multilingual when its packaging path
    is stable.
-2. Comparison reports from saved benchmark artifacts.
-3. Example datasets for first-user smoke runs.
-4. Streaming metrics: time to first partial, finalization latency, and partial
+2. Example datasets for first-user smoke runs.
+3. Streaming metrics: time to first partial, finalization latency, and partial
    transcript stability.
-5. Additional critical-entity slices such as names and addresses after the
+4. Additional critical-entity slices such as names and addresses after the
    numeric contract is stable.
-6. Concurrency runs and a comparable public leaderboard format.
+5. Concurrency runs and a comparable public leaderboard format.
 
 ## License
 
