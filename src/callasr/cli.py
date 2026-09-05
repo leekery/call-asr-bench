@@ -88,9 +88,7 @@ def _validate_configuration(args: argparse.Namespace) -> None:
     if args.codec == "none" and args.packet_loss_rate != 0.0:
         raise ConfigurationError("packet-loss-rate must be zero when codec is none")
     if (args.jitter_std_ms is None) != (args.playout_buffer_ms is None):
-        raise ConfigurationError(
-            "jitter-std-ms and playout-buffer-ms must be provided together"
-        )
+        raise ConfigurationError("jitter-std-ms and playout-buffer-ms must be provided together")
     if args.jitter_std_ms is not None and args.codec == "none":
         raise ConfigurationError("jitter requires codec pcmu or pcma")
 
