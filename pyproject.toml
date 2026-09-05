@@ -33,6 +33,9 @@ dev = [
 faster-whisper = [
     "faster-whisper>=1.2,<2",
 ]
+openai-compatible = [
+    "httpx>=0.28,<1",
+]
 
 [project.scripts]
 callasr = "callasr.cli:main"

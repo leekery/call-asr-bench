@@ -112,16 +112,20 @@ dev = [
 faster-whisper = [
     { name = "faster-whisper" },
 ]
+openai-compatible = [
+    { name = "httpx" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "faster-whisper", marker = "extra == 'faster-whisper'", specifier = ">=1.2,<2" },
+    { name = "httpx", marker = "extra == 'openai-compatible'", specifier = ">=0.28,<1" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "scipy", specifier = ">=1.10" },
 ]
-provides-extras = ["dev", "faster-whisper"]
+provides-extras = ["dev", "faster-whisper", "openai-compatible"]
 
 [[package]]
 name = "certifi"
