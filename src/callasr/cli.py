@@ -110,11 +110,7 @@ def _validate_configuration(args: argparse.Namespace) -> None:
     if args.adapter == "openai-compatible":
         if args.base_url is None:
             raise ConfigurationError("base-url is required with adapter openai-compatible")
-    elif (
-        args.base_url is not None
-        or args.api_key is not None
-        or args.timeout_seconds != 60.0
-    ):
+    elif args.base_url is not None or args.api_key is not None or args.timeout_seconds != 60.0:
         raise ConfigurationError(
             "base-url, api-key, and non-default timeout-seconds are only valid with adapter "
             "openai-compatible"
