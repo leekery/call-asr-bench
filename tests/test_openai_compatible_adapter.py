@@ -4,12 +4,11 @@ import io
 import json
 import wave
 from pathlib import Path
-from typing import ClassVar
 
 import numpy as np
 import pytest
 
-from callasr.adapters.base import ASRAdapter, AdapterError
+from callasr.adapters.base import AdapterError, ASRAdapter
 from callasr.audio import AudioBuffer
 from callasr.benchmark import result_to_dict, run_benchmark
 from callasr.dataset import DatasetItem
