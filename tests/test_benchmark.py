@@ -51,7 +51,7 @@ def test_result_schema_serializes_to_versioned_json_ready_mapping() -> None:
 
     payload = result_to_dict(result)
 
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["dataset"] == {"path": "/tmp/dataset.jsonl", "item_count": 1}
     assert payload["adapter"]["decoding_options"]["temperature"] == 0.0
     assert payload["channel"]["codec"] == "pcmu"
