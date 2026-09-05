@@ -86,6 +86,32 @@ def apply_additive_noise(
     return AudioBuffer(signal + noise, audio.sample_rate)
 
 
+def apply_gain_and_clip(
+    audio: AudioBuffer,
+    *,
+    gain_db: float = 0.0,
+    clip_threshold: float | None = None,
+) -> AudioBuffer:
+    """Apply amplitude gain followed by optional symmetric hard clipping."""
+
+    if not isinstance(gain_db, Real) or isinstance(gain_db, bool) or not np.isfinite(gain_db):
+        raise ValueError("gain_db must be finite")
+    if clip_threshold is not None and (
+        not isinstance(clip_threshold, Real)
+        or isinstance(clip_threshold, bool)
+        or not np.isfinite(clip_threshold)
+        or clip_threshold <= 0.0
+    ):
+        raise ValueError("clip_threshold must be a finite positive number")
+
+    gain = 10.0 ** (float(gain_db) / 20.0)
+    transformed = audio.samples.astype(np.float64) * gain
+    if clip_threshold is not None:
+        threshold = float(clip_threshold)
+        transformed = np.clip(transformed, -threshold, threshold)
+    return AudioBuffer(transformed, audio.sample_rate)
+
+
 def telephone_channel(
     audio: AudioBuffer,
     codec: Codec = "pcmu",
