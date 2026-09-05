@@ -11,7 +11,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.signal import resample_poly
 
 from callasr.codecs.g711 import Codec, decode_g711, encode_g711
-from callasr.impairments import apply_packet_loss
+from callasr.impairments import apply_jitter_loss, apply_packet_loss
 
 TELEPHONE_SAMPLE_RATE = 8_000
 
@@ -93,8 +93,14 @@ def telephone_channel(
     packet_loss_rate: float = 0.0,
     frame_duration_ms: int = 20,
     seed: int = 0,
+    jitter_std_ms: float | None = None,
+    playout_buffer_ms: float | None = None,
+    jitter_seed: int = 0,
 ) -> AudioBuffer:
-    """Apply 8 kHz G.711 transport with optional deterministic packet loss."""
+    """Apply 8 kHz G.711 transport with optional deterministic loss and jitter."""
+
+    if (jitter_std_ms is None) != (playout_buffer_ms is None):
+        raise ValueError("jitter_std_ms and playout_buffer_ms must be provided together")
 
     downsampled = resample(audio, TELEPHONE_SAMPLE_RATE)
     payload = encode_g711(downsampled.samples, codec)
@@ -105,5 +111,14 @@ def telephone_channel(
         frame_duration_ms=frame_duration_ms,
         seed=seed,
     )
+    if jitter_std_ms is not None and playout_buffer_ms is not None:
+        payload = apply_jitter_loss(
+            payload,
+            codec=codec,
+            jitter_std_ms=jitter_std_ms,
+            playout_buffer_ms=playout_buffer_ms,
+            frame_duration_ms=frame_duration_ms,
+            seed=jitter_seed,
+        )
     decoded = decode_g711(payload, codec)
     return AudioBuffer(decoded, TELEPHONE_SAMPLE_RATE)
