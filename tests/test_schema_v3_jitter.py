@@ -123,9 +123,7 @@ def test_telephone_channel_applies_packet_loss_before_jitter(
         seed,
     ):
         assert payload[0] == 0xAA
-        events.append(
-            ("jitter", codec, jitter_std_ms, playout_buffer_ms, frame_duration_ms, seed)
-        )
+        events.append(("jitter", codec, jitter_std_ms, playout_buffer_ms, frame_duration_ms, seed))
         result = payload.copy()
         result[1] = 0xBB
         return result
