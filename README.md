@@ -25,9 +25,13 @@ The end-to-end local runner supports:
   playout buffer;
 - a model-agnostic ASR adapter boundary and a local `faster-whisper` adapter;
 - per-utterance and corpus WER / CER;
+- digit-form phone-number and numeric-entity preservation accuracy;
 - measured adapter time, real-time factor (RTF), and speed factor;
 - the `callasr run` CLI;
 - atomic schema-versioned JSON artifacts.
+
+The lower-level Python API also includes deterministic gain and hard-clipping
+transforms. Gain/clipping is not yet wired into `callasr run`.
 
 ## Install
 
@@ -48,8 +52,8 @@ Create a UTF-8 JSONL manifest with one utterance per line. Audio paths are
 resolved relative to the manifest file:
 
 ```json
-{"id":"call-001","audio":"audio/call-001.wav","reference":"добрый день","language":"ru"}
-{"id":"call-002","audio":"audio/call-002.wav","reference":"your order is ready","language":"en"}
+{"id":"call-001","audio":"audio/call-001.wav","reference":"добрый день, мой номер +7 (916) 123-45-67","language":"ru"}
+{"id":"call-002","audio":"audio/call-002.wav","reference":"your order code is 0042","language":"en"}
 ```
 
 The fields are:
@@ -175,9 +179,43 @@ transcription failure. The requested output is replaced only after every item
 succeeds. A failed run does not leave a partial result that looks like a
 complete benchmark artifact.
 
+## Critical numeric entities
+
+WER can stay low while a phone number or code becomes unusable. Current `main`
+therefore scores preservation of **digit-form** phone and numeric entities in
+addition to WER/CER.
+
+The v0.3 contract is deliberately conservative and representation-preserving:
+
+- a phone-like span has an optional leading `+`, at least seven ASCII digits,
+  and may contain spaces, parentheses, or hyphens between digits;
+- phone formatting is removed for comparison, so `+7 (916) 123-45-67` and
+  `+7 916 123 45 67` both canonicalize to `+79161234567`;
+- other standalone digit runs are generic numeric entities;
+- leading zeroes are semantic, so `0042` does not match `42`;
+- number words are **not** converted to digits. For example, a reference
+  `+7 (916) 123-45-67` does not silently match a hypothesis such as
+  `плюс семь девятьсот шестнадцать ...`.
+
+That final rule is intentional. It makes representation failures from models
+that spell numbers out visible instead of depending on a hidden language-specific
+number normalizer.
+
+Reference and hypothesis entity sequences are aligned in transcript order with
+exact-canonical longest-common-subsequence matching. Per-item accuracy is:
+
+```text
+numeric entity accuracy = matched reference entities / reference entity count
+```
+
+If the reference has no scorable digit-form entities, item accuracy is `null`
+and that item is excluded from the corpus denominator. Hypothesis-only extra
+numeric entities are still recorded in the artifact for diagnosis, but v0.3's
+metric is a preservation/recall-style score and does not penalize those extras.
+
 ## Result artifact
 
-Current `main` writes UTF-8 JSON with `schema_version` set to `3`. The main
+Current `main` writes UTF-8 JSON with `schema_version` set to `4`. The main
 sections are:
 
 - `dataset`: resolved manifest path and item count;
@@ -186,16 +224,22 @@ sections are:
 - `channel`: codec, packet-loss rate, frame duration, run seed, nullable
   `additive_noise_snr_db`, nullable `jitter_std_ms`, and nullable
   `playout_buffer_ms`;
-- `summary`: corpus audio time, measured adapter time, WER, CER, RTF, and speed
-  factor;
+- `summary`: corpus audio time, measured adapter time, WER, CER, RTF, speed
+  factor, numeric-entity matches/reference count, and nullable micro-averaged
+  numeric-entity accuracy;
 - `items`: ordered per-utterance references, hypotheses, language tags,
-  durations, timings, WER, and CER.
+  durations, timings, WER/CER, and a `numeric_entities` diagnostic object.
+
+Each item records extracted reference and hypothesis entities with `kind`, the
+original `surface`, and the comparison `canonical` value, plus `matches`,
+`reference_count`, and nullable `accuracy`. A failed phone-number comparison can
+therefore be inspected directly rather than inferred from one aggregate score.
 
 Disabled optional impairments are represented by `null` channel fields. Jitter
 parameters are always either both set or both `null`.
 
 The published `v0.2.0` tag remains the schema-version-1 release. Schema version
-3 is the current unreleased development contract on `main`; the old release and
+4 is the current unreleased development contract on `main`; the old release and
 its artifacts are not rewritten.
 
 Item audio paths are stored relative to the manifest when possible. JSON is
@@ -211,14 +255,17 @@ utterance's WER equally.
 **CER** is the same idea at character level after the project's text
 normalization; spaces are removed for the character comparison.
 
+Numeric-entity extraction and scoring is a separate metric pipeline. It does
+not alter the WER/CER normalization contract.
+
 **RTF** is:
 
 ```text
 RTF = total adapter seconds / total input-audio seconds
 ```
 
-Only the adapter call is timed. WAV loading, impairment processing, and JSON
-serialization are excluded. Lower RTF is faster.
+Only the adapter call is timed. WAV loading, impairment processing, metric
+calculation, and JSON serialization are excluded. Lower RTF is faster.
 
 **speed factor** is the reciprocal view:
 
@@ -241,19 +288,27 @@ by an atomic replace. Parent directories are created when necessary.
 
 ## Lower-level Python API
 
-The audio primitives remain available independently of the CLI:
+The audio and metric primitives remain available independently of the CLI:
 
 ```python
 import numpy as np
 
-from callasr import AudioBuffer, apply_additive_noise, telephone_channel, word_error_rate
+from callasr import (
+    AudioBuffer,
+    apply_additive_noise,
+    apply_gain_and_clip,
+    score_numeric_entities,
+    telephone_channel,
+    word_error_rate,
+)
 
 source = AudioBuffer(
     samples=np.full(16_000, 0.1, dtype=np.float32),
     sample_rate=16_000,
 )
 
-noisy = apply_additive_noise(source, snr_db=15.0, seed=42)
+front_end = apply_gain_and_clip(source, gain_db=3.0, clip_threshold=0.9)
+noisy = apply_additive_noise(front_end, snr_db=15.0, seed=42)
 phone_audio = telephone_channel(
     noisy,
     codec="pcmu",
@@ -264,19 +319,27 @@ phone_audio = telephone_channel(
     playout_buffer_ms=20.0,
     jitter_seed=43,
 )
-score = word_error_rate(
+wer = word_error_rate(
     reference="добрый день чем могу помочь",
     hypothesis="добрый день чем могу вам помочь",
 )
+entities = score_numeric_entities(
+    reference="мой номер +7 (916) 123-45-67",
+    hypothesis="мой номер +7 916 123 45 67",
+)
 
 print(phone_audio.sample_rate)  # 8000
-print(score)  # 0.2
+print(wer)  # 0.2
+print(entities.accuracy)  # 1.0
 ```
 
 ## Current development limitations
 
 The current local runner does not provide:
 
+- word-to-digit normalization for spoken numeric forms;
+- critical-entity scoring for names or addresses;
+- gain/clipping configuration through the runner or CLI;
 - a full RTP/adaptive jitter-buffer, packet reordering, duplication, or
   correlated network-delay simulation;
 - streaming partial-result metrics;
@@ -302,13 +365,14 @@ The package supports Python 3.10 through 3.13.
 
 ## Roadmap
 
-1. Additional deterministic telephone impairments such as gain mismatch and
-   clipping.
-2. More local and OpenAI-compatible ASR adapters.
-3. Streaming metrics: time to first partial, finalization latency, and partial
+1. More local and OpenAI-compatible ASR adapters.
+2. Comparison reports from saved benchmark artifacts.
+3. Example datasets for first-user smoke runs.
+4. Streaming metrics: time to first partial, finalization latency, and partial
    transcript stability.
-4. Accuracy slices for numbers, names, addresses, Russian, and English.
-5. Concurrency runs and a comparable public leaderboard format.
+5. Additional critical-entity slices such as names and addresses after the
+   numeric contract is stable.
+6. Concurrency runs and a comparable public leaderboard format.
 
 ## License
 
