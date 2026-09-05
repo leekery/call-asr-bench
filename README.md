@@ -21,6 +21,8 @@ The end-to-end local runner supports:
 - clean-audio runs and deterministic 8 kHz G.711 PCMU / PCMA runs;
 - deterministic SNR-controlled Gaussian additive noise;
 - deterministic frame-level packet loss with codec-correct silence substitution;
+- deterministic frame jitter modeled as late G.711 packet loss against a fixed
+  playout buffer;
 - a model-agnostic ASR adapter boundary and a local `faster-whisper` adapter;
 - per-utterance and corpus WER / CER;
 - measured adapter time, real-time factor (RTF), and speed factor;
@@ -85,7 +87,8 @@ uv run callasr run dataset/dataset.jsonl \
 ```
 
 Packet loss must be zero when `--codec none` is selected. Zero is the default,
-so the clean command does not need a packet-loss flag.
+so the clean command does not need a packet-loss flag. Jitter is an encoded
+G.711-frame impairment and is therefore available only with `pcmu` or `pcma`.
 
 `faster-whisper` uses `--device auto` and `--compute-type default` by default.
 They can be overridden explicitly, for example:
@@ -119,8 +122,8 @@ seed for each utterance.
 
 ## Run a telephone-channel benchmark
 
-The same dataset can be passed through additive noise and then G.711 PCMU before
-transcription:
+The same dataset can be passed through additive noise, G.711, packet loss, and
+late-frame jitter before transcription:
 
 ```bash
 uv run callasr run dataset/dataset.jsonl \
@@ -130,27 +133,42 @@ uv run callasr run dataset/dataset.jsonl \
   --packet-loss-rate 0.05 \
   --frame-duration-ms 20 \
   --snr-db 15 \
+  --jitter-std-ms 8 \
+  --playout-buffer-ms 20 \
   --seed 42 \
-  --output runs/large-v3-pcmu-noisy.json
+  --output runs/large-v3-pcmu-impaired.json
 ```
 
-Use `--codec pcma` for G.711 A-law. The impairment order is fixed:
+Use `--codec pcma` for G.711 A-law. `--jitter-std-ms` and
+`--playout-buffer-ms` must be supplied together. The jitter model samples an
+independent zero-mean Gaussian delay variation for each encoded frame; a frame
+whose positive delay variation exceeds the fixed playout buffer is replaced by
+the codec-correct silence value. This is a bounded late-arrival approximation,
+not a complete RTP or adaptive jitter-buffer simulator.
+
+The impairment order is fixed:
 
 ```text
 source WAV
 → optional additive noise
 → G.711 resample / encode
 → optional frame-level packet loss
+→ optional jitter / late-frame loss
 → G.711 decode
 → ASR adapter
 ```
 
-Packet loss is applied at encoded-frame level. The packet-loss seed derivation
-is unchanged from v0.2: the run-level seed is combined with each manifest
-position, so repeated runs with the same dataset and seed use the same loss
-masks without applying an identical mask to every utterance. Additive noise uses
-a separate deterministic per-item random stream and therefore does not perturb
-the packet-loss sequence.
+The random streams are deterministic and intentionally independent:
+
+```text
+packet loss: SeedSequence([run_seed, item_index])
+noise:       SeedSequence([run_seed, item_index, 1])
+jitter:      SeedSequence([run_seed, item_index, 2])
+```
+
+The packet-loss and additive-noise derivations are unchanged from their earlier
+contracts, so enabling jitter does not perturb either existing random stream.
+Runs without jitter keep the earlier telephone-channel call path.
 
 The runner is sequential and stops on the first dataset, audio, channel, or
 transcription failure. The requested output is replaced only after every item
@@ -159,23 +177,25 @@ complete benchmark artifact.
 
 ## Result artifact
 
-Current `main` writes UTF-8 JSON with `schema_version` set to `2`. The main
+Current `main` writes UTF-8 JSON with `schema_version` set to `3`. The main
 sections are:
 
 - `dataset`: resolved manifest path and item count;
 - `adapter`: adapter name, model identifier, device, compute type, and decoding
   options;
-- `channel`: codec, packet-loss rate, frame duration, run seed, and nullable
-  `additive_noise_snr_db`;
+- `channel`: codec, packet-loss rate, frame duration, run seed, nullable
+  `additive_noise_snr_db`, nullable `jitter_std_ms`, and nullable
+  `playout_buffer_ms`;
 - `summary`: corpus audio time, measured adapter time, WER, CER, RTF, and speed
   factor;
 - `items`: ordered per-utterance references, hypotheses, language tags,
   durations, timings, WER, and CER.
 
-When additive noise is disabled, `channel.additive_noise_snr_db` is `null`.
+Disabled optional impairments are represented by `null` channel fields. Jitter
+parameters are always either both set or both `null`.
 
 The published `v0.2.0` tag remains the schema-version-1 release. Schema version
-2 is the current unreleased development contract on `main`; the old release and
+3 is the current unreleased development contract on `main`; the old release and
 its artifacts are not rewritten.
 
 Item audio paths are stored relative to the manifest when possible. JSON is
@@ -240,6 +260,9 @@ phone_audio = telephone_channel(
     packet_loss_rate=0.05,
     frame_duration_ms=20,
     seed=42,
+    jitter_std_ms=8.0,
+    playout_buffer_ms=20.0,
+    jitter_seed=43,
 )
 score = word_error_rate(
     reference="добрый день чем могу помочь",
@@ -254,8 +277,9 @@ print(score)  # 0.2
 
 The current local runner does not provide:
 
+- a full RTP/adaptive jitter-buffer, packet reordering, duplication, or
+  correlated network-delay simulation;
 - streaming partial-result metrics;
-- jitter simulation or richer channel profiles;
 - concurrent-call benchmarks;
 - remote ASR API adapters;
 - GigaAM integration;
@@ -278,7 +302,8 @@ The package supports Python 3.10 through 3.13.
 
 ## Roadmap
 
-1. Additional telephone-channel profiles: jitter and related impairments.
+1. Additional deterministic telephone impairments such as gain mismatch and
+   clipping.
 2. More local and OpenAI-compatible ASR adapters.
 3. Streaming metrics: time to first partial, finalization latency, and partial
    transcript stability.

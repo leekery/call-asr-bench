@@ -41,6 +41,8 @@ class ChannelInfo:
     frame_duration_ms: int
     seed: int
     additive_noise_snr_db: float | None = None
+    jitter_std_ms: float | None = None
+    playout_buffer_ms: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +70,7 @@ class ItemResult:
 
 @dataclass(frozen=True, slots=True)
 class BenchmarkResult:
-    schema_version: int = field(default=2, init=False)
+    schema_version: int = field(default=3, init=False)
     created_at: str
     dataset: DatasetInfo
     adapter: AdapterInfo
@@ -95,6 +97,22 @@ def _additive_noise_seed(run_seed: int, item_index: int) -> int:
     return int(sequence.generate_state(1, dtype=np.uint32)[0])
 
 
+def _jitter_seed(run_seed: int, item_index: int) -> int:
+    sequence = np.random.SeedSequence([run_seed, item_index, 2])
+    return int(sequence.generate_state(1, dtype=np.uint32)[0])
+
+
+def _validate_jitter_configuration(
+    codec: Literal["none", "pcmu", "pcma"],
+    jitter_std_ms: float | None,
+    playout_buffer_ms: float | None,
+) -> None:
+    if (jitter_std_ms is None) != (playout_buffer_ms is None):
+        raise ValueError("jitter_std_ms and playout_buffer_ms must be provided together")
+    if jitter_std_ms is not None and codec == "none":
+        raise ValueError("jitter requires codec 'pcmu' or 'pcma'")
+
+
 def _artifact_audio_path(audio_path: Path, manifest_path: Path) -> str:
     try:
         return str(audio_path.relative_to(manifest_path.parent))
@@ -110,10 +128,13 @@ def run_benchmark(
     packet_loss_rate: float = 0.0,
     frame_duration_ms: int = 20,
     snr_db: float | None = None,
+    jitter_std_ms: float | None = None,
+    playout_buffer_ms: float | None = None,
     seed: int = 0,
 ) -> BenchmarkResult:
     """Run a validated dataset sequentially through an injected ASR adapter."""
 
+    _validate_jitter_configuration(codec, jitter_std_ms, playout_buffer_ms)
     resolved_manifest = Path(manifest_path).expanduser().resolve()
     dataset_items = load_dataset_manifest(resolved_manifest)
     item_results: list[ItemResult] = []
@@ -131,13 +152,26 @@ def run_benchmark(
                 seed=_additive_noise_seed(seed, item_index),
             )
         if codec != "none":
-            audio = telephone_channel(
-                audio,
-                codec=codec,
-                packet_loss_rate=packet_loss_rate,
-                frame_duration_ms=frame_duration_ms,
-                seed=_packet_loss_seed(seed, item_index),
-            )
+            packet_seed = _packet_loss_seed(seed, item_index)
+            if jitter_std_ms is None:
+                audio = telephone_channel(
+                    audio,
+                    codec=codec,
+                    packet_loss_rate=packet_loss_rate,
+                    frame_duration_ms=frame_duration_ms,
+                    seed=packet_seed,
+                )
+            else:
+                audio = telephone_channel(
+                    audio,
+                    codec=codec,
+                    packet_loss_rate=packet_loss_rate,
+                    frame_duration_ms=frame_duration_ms,
+                    seed=packet_seed,
+                    jitter_std_ms=jitter_std_ms,
+                    playout_buffer_ms=playout_buffer_ms,
+                    jitter_seed=_jitter_seed(seed, item_index),
+                )
 
         audio_seconds = audio.samples.size / audio.sample_rate
         started_at = perf_counter()
@@ -185,6 +219,8 @@ def run_benchmark(
             frame_duration_ms=frame_duration_ms,
             seed=seed,
             additive_noise_snr_db=snr_db,
+            jitter_std_ms=jitter_std_ms,
+            playout_buffer_ms=playout_buffer_ms,
         ),
         summary=BenchmarkSummary(
             total_audio_seconds=total_audio_seconds,

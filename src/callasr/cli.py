@@ -40,6 +40,13 @@ def _finite_float(value: str) -> float:
     return parsed
 
 
+def _non_negative_float(value: str) -> float:
+    parsed = _finite_float(value)
+    if parsed < 0.0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return parsed
+
+
 def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed <= 0:
@@ -68,6 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--packet-loss-rate", type=_probability, default=0.0)
     run.add_argument("--frame-duration-ms", type=_positive_int, default=20)
     run.add_argument("--snr-db", type=_finite_float)
+    run.add_argument("--jitter-std-ms", type=_non_negative_float)
+    run.add_argument("--playout-buffer-ms", type=_non_negative_float)
     run.add_argument("--seed", type=_non_negative_int, default=0)
     run.add_argument("--output", required=True)
     run.add_argument("--device", default="auto")
@@ -78,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
 def _validate_configuration(args: argparse.Namespace) -> None:
     if args.codec == "none" and args.packet_loss_rate != 0.0:
         raise ConfigurationError("packet-loss-rate must be zero when codec is none")
+    if (args.jitter_std_ms is None) != (args.playout_buffer_ms is None):
+        raise ConfigurationError("jitter-std-ms and playout-buffer-ms must be provided together")
+    if args.jitter_std_ms is not None and args.codec == "none":
+        raise ConfigurationError("jitter requires codec pcmu or pcma")
 
 
 def _build_adapter(args: argparse.Namespace) -> FasterWhisperAdapter:
@@ -133,6 +146,8 @@ def _run(args: argparse.Namespace) -> int:
         packet_loss_rate=args.packet_loss_rate,
         frame_duration_ms=args.frame_duration_ms,
         snr_db=args.snr_db,
+        jitter_std_ms=args.jitter_std_ms,
+        playout_buffer_ms=args.playout_buffer_ms,
         seed=args.seed,
     )
     write_result_artifact(result, args.output)
