@@ -173,9 +173,7 @@ class OpenAICompatibleAdapter:
             raise AdapterError("OpenAI-compatible transcription request failed") from exc
 
         if not 200 <= response.status_code < 300:
-            raise AdapterError(
-                f"OpenAI-compatible endpoint returned HTTP {response.status_code}"
-            )
+            raise AdapterError(f"OpenAI-compatible endpoint returned HTTP {response.status_code}")
         try:
             payload = response.json()
         except ValueError as exc:
