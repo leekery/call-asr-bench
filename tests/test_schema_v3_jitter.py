@@ -244,8 +244,9 @@ def test_runner_without_jitter_preserves_current_behavior(
 
     assert result.channel.jitter_std_ms is None
     assert result.channel.playout_buffer_ms is None
-    assert seen["jitter_std_ms"] is None
-    assert seen["playout_buffer_ms"] is None
+    assert "jitter_std_ms" not in seen
+    assert "playout_buffer_ms" not in seen
+    assert "jitter_seed" not in seen
 
 
 @pytest.mark.parametrize(
