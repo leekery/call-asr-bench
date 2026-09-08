@@ -218,8 +218,8 @@ seed for each utterance.
 ## Run a telephone-channel benchmark
 
 The same dataset can be passed through front-end gain/clipping, additive noise,
-G.711, packet loss, and late-frame jitter before transcription. The impairment pipeline is independent
-of which ASR adapter receives the resulting audio.
+G.711, packet loss, and late-frame jitter before transcription. The impairment
+pipeline is independent of which ASR adapter receives the resulting audio.
 
 ```bash
 uv run callasr run dataset/dataset.jsonl \
@@ -367,7 +367,9 @@ escaped so pipes or newlines cannot corrupt the Markdown table. Unknown schema
 versions, malformed fields, unreadable files, and invalid JSON fail with an
 artifact-path-qualified error instead of silently filling defaults.
 
-Schema v6 additionally records front-end gain/clipping. `callasr compare` shows explicit `Gain dB` and `Clip` columns; schema-v1 through schema-v5 artifacts render those fields as unavailable rather than assuming zero.
+Schema v6 additionally records front-end gain/clipping. `callasr compare` shows
+explicit `Gain dB` and `Clip` columns; schema-v1 through schema-v5 artifacts render
+those fields as unavailable rather than assuming zero.
 
 Schema-v5 artifacts add `dataset.fingerprint` as a versioned SHA-256 identity.
 The fingerprint is order-sensitive and includes each item's `id`, reference text,
