@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from math import isfinite
 from numbers import Real
 from time import perf_counter
@@ -132,7 +133,7 @@ def partial_stability_score(partials: Iterable[str], final_text: str) -> float |
     states.append(_normalized_tokens(final_text))
 
     similarities: list[float] = []
-    for previous, current in zip(states[:-1], states[1:], strict=True):
+    for previous, current in pairwise(states):
         denominator = max(len(previous), len(current), 1)
         edits = _token_edit_distance(previous, current)
         similarities.append(1.0 - edits / denominator)
