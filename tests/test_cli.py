@@ -17,11 +17,17 @@ from callasr.benchmark import (
     ItemResult,
 )
 
+_FINGERPRINT = "sha256:" + "0" * 64
+
 
 def _result() -> BenchmarkResult:
     return BenchmarkResult(
         created_at="2026-09-04T17:00:00+00:00",
-        dataset=DatasetInfo(path="/tmp/dataset.jsonl", item_count=1),
+        dataset=DatasetInfo(
+            path="/tmp/dataset.jsonl",
+            item_count=1,
+            fingerprint=_FINGERPRINT,
+        ),
         adapter=AdapterInfo(
             name="faster-whisper",
             model="large-v3",
@@ -145,7 +151,8 @@ def test_run_uses_temp_manifest_real_runner_and_writes_utf8_json(
     assert "\\u0434" not in raw
     assert raw.startswith("{\n  ")
     payload = json.loads(raw)
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
+    assert payload["dataset"]["fingerprint"].startswith("sha256:")
     assert payload["channel"] == {
         "codec": "pcmu",
         "packet_loss_rate": 0.05,
@@ -258,4 +265,4 @@ def test_artifact_writer_uses_same_directory_atomic_replace(
     cli.write_result_artifact(_result(), output)
 
     assert seen and seen[0][1] == output
-    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == 4
+    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == 5
