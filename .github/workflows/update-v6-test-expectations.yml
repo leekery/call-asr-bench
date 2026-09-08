@@ -1,0 +1,100 @@
+name: Update schema v6 test expectations
+
+on:
+  push:
+    branches:
+      - feat/gain-clipping-runner
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Update legacy expectations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          simple = [
+              "tests/test_benchmark.py",
+              "tests/test_cli.py",
+              "tests/test_numeric_entities.py",
+              "tests/test_schema_v2_noise.py",
+              "tests/test_schema_v3_jitter.py",
+          ]
+          for filename in simple:
+              path = Path(filename)
+              text = path.read_text(encoding="utf-8")
+              text = text.replace('["schema_version"] == 5', '["schema_version"] == 6')
+              path.write_text(text, encoding="utf-8")
+
+          path = Path("tests/test_dataset_fingerprint.py")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace("assert result.schema_version == 5", "assert result.schema_version == 6")
+          text = text.replace(
+              "test_runner_records_schema_v5_dataset_fingerprint",
+              "test_runner_records_current_schema_dataset_fingerprint",
+          )
+          path.write_text(text, encoding="utf-8")
+
+          path = Path("tests/test_numeric_entities.py")
+          text = path.read_text(encoding="utf-8").replace(
+              "test_current_result_schema_is_v5_and_entity_fields_are_json_ready",
+              "test_current_result_schema_is_v6_and_entity_fields_are_json_ready",
+          )
+          path.write_text(text, encoding="utf-8")
+
+          path = Path("tests/test_cli.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''        "seed": 42,\n        "additive_noise_snr_db": None,'''
+          new = '''        "seed": 42,\n        "gain_db": 0.0,\n        "clip_threshold": None,\n        "additive_noise_snr_db": None,'''
+          if text.count(old) != 1:
+              raise SystemExit("unexpected CLI channel fixture shape")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          path = Path("tests/test_comparison_report.py")
+          text = path.read_text(encoding="utf-8")
+          replacements = [
+              (
+                  '"| Artifact | Schema | Adapter | Model | Codec | Loss | SNR dB | Jitter ms | "\n        "WER | CER | RTF | Speed | Numeric entity | Items |"',
+                  '"| Artifact | Schema | Adapter | Model | Codec | Loss | Gain dB | Clip | SNR dB | "\n        "Jitter ms | WER | CER | RTF | Speed | Numeric entity | Items |"',
+              ),
+              (
+                  '"| --- | ---: | --- | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | "\n        "---: | ---: | ---: |"',
+                  '"| --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | "\n        "---: | ---: | ---: | ---: | ---: |"',
+              ),
+              (
+                  '"| v1.json | 1 | faster-whisper | old-model | pcmu | 0.05 | — | — | 0.1 | "\n        "0.05 | 0.2 | 5 | — | 2 |"',
+                  '"| v1.json | 1 | faster-whisper | old-model | pcmu | 0.05 | — | — | — | — | "\n        "0.1 | 0.05 | 0.2 | 5 | — | 2 |"',
+              ),
+              (
+                  '"| v4.json | 4 | openai-compatible | served-model | pcma | 0.1 | 15 | 8/20 | "\n        "0.08 | 0.03 | 0.25 | 4 | 0.75 | 2 |"',
+                  '"| v4.json | 4 | openai-compatible | served-model | pcma | 0.1 | — | — | 15 | "\n        "8/20 | 0.08 | 0.03 | 0.25 | 4 | 0.75 | 2 |"',
+              ),
+              (
+                  'assert "| 0 | 0 | 0/0 | 0 | 0 | 0 | — | 0 |" in row',
+                  'assert "| — | — | 0 | 0/0 | 0 | 0 | 0 | — | 0 |" in row',
+              ),
+              (
+                  '@pytest.mark.parametrize("schema", [0, 6, -1])',
+                  '@pytest.mark.parametrize("schema", [0, 7, -1])',
+              ),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f"unexpected comparison fixture: {old[:80]!r}")
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+      - name: Commit expectations
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests
+          git diff --cached --quiet && exit 0
+          git commit -m "test: update legacy expectations for schema v6"
+          git push
