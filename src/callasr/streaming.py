@@ -83,9 +83,7 @@ def frame_audio(audio: AudioBuffer, frame_duration_ms: int = 20) -> tuple[AudioB
 
     frame_numerator = audio.sample_rate * frame_duration_ms
     if frame_numerator % 1_000 != 0:
-        raise StreamingError(
-            "frame_duration_ms must resolve to an exact integer number of samples"
-        )
+        raise StreamingError("frame_duration_ms must resolve to an exact integer number of samples")
     frame_samples = frame_numerator // 1_000
     if frame_samples <= 0:
         raise StreamingError("frame_duration_ms produces an empty audio frame")
@@ -236,9 +234,7 @@ def run_streaming_benchmark(
     finalization_latency = final_observed_at - last_frame_submitted_at
     total_wall = ended_at - started_at
     time_to_first_partial = (
-        None
-        if first_partial_observed_at is None
-        else first_partial_observed_at - started_at
+        None if first_partial_observed_at is None else first_partial_observed_at - started_at
     )
     derived = [finalization_latency, total_wall]
     if time_to_first_partial is not None:
