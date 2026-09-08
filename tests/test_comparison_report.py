@@ -188,7 +188,7 @@ def test_markdown_special_content_is_escaped_deterministically(tmp_path: Path) -
     assert len(report.splitlines()) == 3
 
 
-@pytest.mark.parametrize("schema", [0, 5, -1])
+@pytest.mark.parametrize("schema", [0, 6, -1])
 def test_unknown_schema_is_rejected_with_artifact_path(tmp_path: Path, schema: int) -> None:
     ComparisonError, compare_result_artifacts, _, _ = _api()
     path = _write(tmp_path / "unknown.json", _artifact(schema))
