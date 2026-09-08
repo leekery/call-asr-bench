@@ -2,7 +2,7 @@
 
 All notable changes to `call-asr-bench` are documented here.
 
-## 0.3.0 - 2026-09-05
+## 0.3.0 - 2026-09-08
 
 ### Added
 
@@ -33,7 +33,7 @@ All notable changes to `call-asr-bench` are documented here.
 
 - gain/clipping is available as a lower-level Python primitive but is not yet exposed through `callasr run`;
 - the smoke fixture is synthetic non-speech and is only for end-to-end plumbing verification, not model-quality comparison;
-- GigaAM Multilingual integration remains deferred because upstream multilingual packaging is not yet available through the stable published package path;
+- GigaAM Multilingual integration is deferred from v0.3.0 and remains tracked separately in issue #22;
 - streaming metrics, concurrency benchmarking, automatic dataset downloading, and hosted leaderboard infrastructure remain future work.
 
 ## 0.2.0 - 2026-09-04
