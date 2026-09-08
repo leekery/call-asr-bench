@@ -11,7 +11,7 @@ from typing import Literal
 import numpy as np
 
 from callasr.adapters.base import ASRAdapter
-from callasr.audio import apply_additive_noise, telephone_channel
+from callasr.audio import apply_additive_noise, apply_gain_and_clip, telephone_channel
 from callasr.dataset import DatasetError, dataset_fingerprint, load_dataset_manifest
 from callasr.io import load_wav
 from callasr.metrics.entities import NumericEntityScore, score_numeric_entities
@@ -42,6 +42,8 @@ class ChannelInfo:
     packet_loss_rate: float
     frame_duration_ms: int
     seed: int
+    gain_db: float = 0.0
+    clip_threshold: float | None = None
     additive_noise_snr_db: float | None = None
     jitter_std_ms: float | None = None
     playout_buffer_ms: float | None = None
@@ -76,7 +78,7 @@ class ItemResult:
 
 @dataclass(frozen=True, slots=True)
 class BenchmarkResult:
-    schema_version: int = field(default=5, init=False)
+    schema_version: int = field(default=6, init=False)
     created_at: str
     dataset: DatasetInfo
     adapter: AdapterInfo
@@ -133,6 +135,8 @@ def run_benchmark(
     codec: Literal["none", "pcmu", "pcma"] = "none",
     packet_loss_rate: float = 0.0,
     frame_duration_ms: int = 20,
+    gain_db: float = 0.0,
+    clip_threshold: float | None = None,
     snr_db: float | None = None,
     jitter_std_ms: float | None = None,
     playout_buffer_ms: float | None = None,
@@ -158,6 +162,12 @@ def run_benchmark(
 
     for item_index, item in enumerate(dataset_items):
         audio = load_wav(item.audio)
+        if gain_db != 0.0 or clip_threshold is not None:
+            audio = apply_gain_and_clip(
+                audio,
+                gain_db=gain_db,
+                clip_threshold=clip_threshold,
+            )
         if snr_db is not None:
             audio = apply_additive_noise(
                 audio,
@@ -244,6 +254,8 @@ def run_benchmark(
             packet_loss_rate=packet_loss_rate,
             frame_duration_ms=frame_duration_ms,
             seed=seed,
+            gain_db=gain_db,
+            clip_threshold=clip_threshold,
             additive_noise_snr_db=snr_db,
             jitter_std_ms=jitter_std_ms,
             playout_buffer_ms=playout_buffer_ms,
