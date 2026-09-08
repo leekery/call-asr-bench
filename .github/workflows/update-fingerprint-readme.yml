@@ -1,0 +1,71 @@
+name: Update fingerprint README
+
+on:
+  push:
+    branches:
+      - feat/dataset-fingerprint
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Update README contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("README.md")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  "- deterministic Markdown comparison of saved schema-v1 through schema-v4 artifacts;",
+                  "- deterministic Markdown comparison of saved schema-v1 through schema-v5 artifacts with dataset identity checks;",
+              ),
+              (
+                  "Current `main` writes UTF-8 JSON with `schema_version` set to `4`.",
+                  "Current `main` writes UTF-8 JSON with `schema_version` set to `5`.",
+              ),
+              (
+                  "- `dataset`: resolved manifest path and item count;",
+                  "- `dataset`: resolved manifest path, item count, and path-independent dataset fingerprint;",
+              ),
+              (
+                  "The published `v0.2.0` tag remains the schema-version-1 release. Schema version\n4 is the current unreleased development contract on `main`; the old release and\nits artifacts are not rewritten.",
+                  "Published `v0.2.0` artifacts remain schema version 1 and published `v0.3.0`\nartifacts remain schema version 4. Current `main` writes schema version 5; published\ntags and their artifacts are not rewritten.",
+              ),
+              (
+                  "The command writes a deterministic Markdown table to stdout. It accepts known\ncall-asr-bench schema versions 1 through 4 and keeps the schema version visible\nfor every row.",
+                  "The command writes a deterministic Markdown table to stdout. It accepts known\ncall-asr-bench schema versions 1 through 5 and keeps the schema version visible\nfor every row.",
+              ),
+              (
+                  "Current artifacts record the manifest path and item count, but they do **not**\ncontain a dataset content fingerprint. Therefore `callasr compare` cannot prove\nthat two same-size manifests contain identical samples. The table always shows\nthe item count, and users remain responsible for comparing runs produced from\nequivalent datasets. A future result schema can add a dataset fingerprint rather\nthan pretending the current artifacts provide one.",
+                  "Schema-v5 artifacts add `dataset.fingerprint` as a versioned SHA-256 identity.\nThe fingerprint is order-sensitive and includes each item's `id`, reference text,\noptional language, and the SHA-256 digest of the exact source WAV bytes. Absolute\nmanifest locations and audio pathnames are excluded, so moving or renaming an\notherwise identical dataset does not change its identity.\n\nWhen `callasr compare` receives two or more artifacts with known schema-v5\nfingerprints, all known fingerprints must match; a mismatch is a hard error rather\nthan a potentially misleading table. Schema-v1 through schema-v4 artifacts remain\nreadable, but they do not contain enough information to prove dataset identity.",
+              ),
+              (
+                  "- dataset content fingerprints for automatic cross-run identity checks;\n",
+                  "",
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one README occurrence, got {count}: {old[:80]!r}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+      - name: Commit README
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --cached --quiet && exit 0
+          git commit -m "docs: document schema v5 dataset identity"
+          git push
