@@ -1,0 +1,89 @@
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text(encoding="utf-8")
+
+replacements = [
+    (
+        "- deterministic SNR-controlled Gaussian additive noise;",
+        "- deterministic front-end gain and symmetric hard clipping;\n- deterministic SNR-controlled Gaussian additive noise;",
+    ),
+    (
+        "- deterministic Markdown comparison of saved schema-v1 through schema-v5 artifacts with dataset identity checks;",
+        "- deterministic Markdown comparison of saved schema-v1 through schema-v6 artifacts with dataset identity and front-end configuration checks;",
+    ),
+    (
+        "The lower-level Python API also includes deterministic gain and hard-clipping\ntransforms. Gain/clipping is not yet wired into `callasr run`.",
+        "Gain and symmetric hard clipping are available through both `callasr run` and\nthe lower-level Python API.",
+    ),
+    (
+        "Current `main` writes UTF-8 JSON with `schema_version` set to `5`.",
+        "Current `main` writes UTF-8 JSON with `schema_version` set to `6`.",
+    ),
+    (
+        "- `channel`: codec, packet-loss rate, frame duration, run seed, nullable\n  `additive_noise_snr_db`, nullable `jitter_std_ms`, and nullable\n  `playout_buffer_ms`;",
+        "- `channel`: codec, packet-loss rate, frame duration, run seed, `gain_db`,\n  nullable `clip_threshold`, nullable `additive_noise_snr_db`, nullable\n  `jitter_std_ms`, and nullable `playout_buffer_ms`;",
+    ),
+    (
+        "The command writes a deterministic Markdown table to stdout. It accepts known\ncall-asr-bench schema versions 1 through 5 and keeps the schema version visible\nfor every row.",
+        "The command writes a deterministic Markdown table to stdout. It accepts known\ncall-asr-bench schema versions 1 through 6 and keeps the schema version visible\nfor every row.",
+    ),
+    (
+        "Published `v0.2.0` artifacts remain schema version 1 and published `v0.3.0`\nartifacts remain schema version 4. Current `main` writes schema version 5; published\ntags and their artifacts are not rewritten.",
+        "Published `v0.2.0` artifacts remain schema version 1 and published `v0.3.0`\nartifacts remain schema version 4. Current `main` writes schema version 6; published\ntags and their artifacts are not rewritten.",
+    ),
+    (
+        "The same dataset can be passed through additive noise, G.711, packet loss, and\nlate-frame jitter before transcription.",
+        "The same dataset can be passed through front-end gain/clipping, additive noise,\nG.711, packet loss, and late-frame jitter before transcription.",
+    ),
+    (
+        "source WAV\n→ optional additive noise\n→ G.711 resample / encode",
+        "source WAV\n→ optional gain / hard clipping\n→ optional additive noise\n→ G.711 resample / encode",
+    ),
+]
+for old, new in replacements:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"expected one README occurrence, got {count}: {old[:80]!r}")
+    text = text.replace(old, new, 1)
+
+anchor = "## Add deterministic acoustic noise\n"
+if text.count(anchor) != 1:
+    raise SystemExit("unexpected acoustic-noise section anchor")
+gain_section = """## Apply deterministic gain and clipping
+
+Use `--gain-db` to model a fixed front-end level change and `--clip-threshold` to
+model symmetric hard clipping before any acoustic noise or telephone-channel
+processing. Gain uses the amplitude conversion `10 ** (gain_db / 20)` and is
+applied first; clipping then limits samples to `[-threshold, +threshold]`.
+
+```bash
+uv run callasr run dataset/dataset.jsonl \\
+  --adapter faster-whisper \\
+  --model large-v3 \\
+  --codec none \\
+  --gain-db 6 \\
+  --clip-threshold 0.8 \\
+  --output runs/large-v3-front-end.json
+```
+
+There is no automatic normalization and no implicit clipping to `[-1, 1]` in
+this impairment. Omit `--clip-threshold` to disable hard clipping. The defaults
+`--gain-db 0` with no clip threshold preserve the earlier audio path exactly;
+the transform is not invoked at all in that configuration.
+
+"""
+text = text.replace(anchor, gain_section + anchor, 1)
+
+caveat = "Schema-v5 artifacts add `dataset.fingerprint` as a versioned SHA-256 identity."
+if text.count(caveat) != 1:
+    raise SystemExit("unexpected dataset fingerprint paragraph")
+compare_note = (
+    "Schema v6 additionally records front-end gain/clipping. `callasr compare` shows "
+    "explicit `Gain dB` and `Clip` columns; schema-v1 through schema-v5 artifacts "
+    "render those fields as unavailable rather than assuming zero.\n\n"
+)
+text = text.replace(caveat, compare_note + caveat, 1)
+
+text = text.replace("- gain/clipping configuration through the runner or CLI;\n", "")
+path.write_text(text, encoding="utf-8")
