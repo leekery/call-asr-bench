@@ -224,8 +224,7 @@ def _validate_dataset_identity(rows: tuple[ComparisonRow, ...]) -> None:
     for row in known[1:]:
         if row.dataset_fingerprint != first.dataset_fingerprint:
             raise ComparisonError(
-                "dataset fingerprint mismatch between "
-                f"{first.artifact} and {row.artifact}"
+                f"dataset fingerprint mismatch between {first.artifact} and {row.artifact}"
             )
 
 
