@@ -20,6 +20,8 @@ from callasr.benchmark import (
 )
 from callasr.dataset import DatasetItem
 
+_FINGERPRINT = "sha256:" + "0" * 64
+
 
 class FakeAdapter:
     name = "fake"
@@ -47,7 +49,11 @@ def _item(tmp_path: Path) -> DatasetItem:
 def _result() -> BenchmarkResult:
     return BenchmarkResult(
         created_at="2026-09-05T20:00:00+00:00",
-        dataset=DatasetInfo(path="/tmp/dataset.jsonl", item_count=1),
+        dataset=DatasetInfo(
+            path="/tmp/dataset.jsonl",
+            item_count=1,
+            fingerprint=_FINGERPRINT,
+        ),
         adapter=AdapterInfo(
             name="fake",
             model="fake-model",
@@ -91,7 +97,7 @@ def _result() -> BenchmarkResult:
 def test_current_schema_records_jitter_configuration() -> None:
     payload = result_to_dict(_result())
 
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert payload["channel"]["jitter_std_ms"] == 8.0
     assert payload["channel"]["playout_buffer_ms"] == 20.0
 
