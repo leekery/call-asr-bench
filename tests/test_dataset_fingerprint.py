@@ -151,7 +151,7 @@ def test_fingerprint_is_manifest_order_sensitive(tmp_path: Path) -> None:
     assert _fingerprint((first, second)) != _fingerprint((second, first))
 
 
-def test_runner_records_schema_v5_dataset_fingerprint(tmp_path: Path) -> None:
+def test_runner_records_current_schema_dataset_fingerprint(tmp_path: Path) -> None:
     audio = tmp_path / "sample.wav"
     _write_pcm16_wav(audio)
     manifest = tmp_path / "dataset.jsonl"
@@ -180,7 +180,7 @@ def test_runner_records_schema_v5_dataset_fingerprint(tmp_path: Path) -> None:
 
     result = run_benchmark(manifest, FakeAdapter())
 
-    assert result.schema_version == 5
+    assert result.schema_version == 6
     assert result.dataset.fingerprint == _fingerprint(load_dataset_manifest(manifest))
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", result.dataset.fingerprint)
 
