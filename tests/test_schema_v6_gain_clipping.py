@@ -9,7 +9,7 @@ import pytest
 
 from callasr.adapters.base import Transcription
 from callasr.audio import AudioBuffer
-from callasr.benchmark import BenchmarkResult, run_benchmark
+from callasr.benchmark import run_benchmark
 from callasr.dataset import DatasetItem
 
 
@@ -200,7 +200,12 @@ def test_clean_run_can_apply_gain_and_clipping_without_telephone_channel(
     _patch_single_item(monkeypatch, tmp_path, source)
     seen: list[tuple[float, float | None]] = []
 
-    def transform(audio: AudioBuffer, *, gain_db: float, clip_threshold: float | None) -> AudioBuffer:
+    def transform(
+        audio: AudioBuffer,
+        *,
+        gain_db: float,
+        clip_threshold: float | None,
+    ) -> AudioBuffer:
         seen.append((gain_db, clip_threshold))
         return audio
 
