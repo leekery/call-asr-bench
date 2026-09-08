@@ -4,7 +4,7 @@ import json
 import re
 import wave
 from pathlib import Path
-from types import SimpleNamespace
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -173,7 +173,7 @@ def test_runner_records_schema_v5_dataset_fingerprint(tmp_path: Path) -> None:
         model = "fake-model"
         device = "cpu"
         compute_type = "float32"
-        decoding_options: dict[str, object] = {}
+        decoding_options: ClassVar[dict[str, object]] = {}
 
         def transcribe(self, audio, language=None):
             return Transcription(text="hello")
