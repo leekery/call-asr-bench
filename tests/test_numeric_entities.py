@@ -170,7 +170,7 @@ def test_no_reference_entities_has_null_accuracy_and_keeps_hypothesis_extras() -
     assert score.accuracy is None
 
 
-def test_current_result_schema_is_v5_and_entity_fields_are_json_ready() -> None:
+def test_current_result_schema_is_v6_and_entity_fields_are_json_ready() -> None:
     NumericEntity, NumericEntityScore, _, _ = _entities_api()
     entity_score = NumericEntityScore(
         reference=(NumericEntity(kind="number", surface="0042", canonical="0042"),),
@@ -228,7 +228,7 @@ def test_current_result_schema_is_v5_and_entity_fields_are_json_ready() -> None:
 
     payload = result_to_dict(result)
 
-    assert payload["schema_version"] == 5
+    assert payload["schema_version"] == 6
     assert payload["dataset"]["fingerprint"] == _FINGERPRINT
     assert payload["summary"]["numeric_entity_reference_count"] == 1
     assert payload["summary"]["numeric_entity_accuracy"] == 0.0

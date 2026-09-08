@@ -117,20 +117,20 @@ def test_mixed_known_schemas_render_common_metrics_and_optional_fields(tmp_path:
 
     report = compare_result_artifacts([old, current])
     header = (
-        "| Artifact | Schema | Adapter | Model | Codec | Loss | SNR dB | Jitter ms | "
-        "WER | CER | RTF | Speed | Numeric entity | Items |"
+        "| Artifact | Schema | Adapter | Model | Codec | Loss | Gain dB | Clip | SNR dB | "
+        "Jitter ms | WER | CER | RTF | Speed | Numeric entity | Items |"
     )
     separator = (
-        "| --- | ---: | --- | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | "
-        "---: | ---: | ---: |"
+        "| --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | "
+        "---: | ---: | ---: | ---: | ---: |"
     )
     old_row = (
-        "| v1.json | 1 | faster-whisper | old-model | pcmu | 0.05 | — | — | 0.1 | "
-        "0.05 | 0.2 | 5 | — | 2 |"
+        "| v1.json | 1 | faster-whisper | old-model | pcmu | 0.05 | — | — | — | — | "
+        "0.1 | 0.05 | 0.2 | 5 | — | 2 |"
     )
     current_row = (
-        "| v4.json | 4 | openai-compatible | served-model | pcma | 0.1 | 15 | 8/20 | "
-        "0.08 | 0.03 | 0.25 | 4 | 0.75 | 2 |"
+        "| v4.json | 4 | openai-compatible | served-model | pcma | 0.1 | — | — | 15 | "
+        "8/20 | 0.08 | 0.03 | 0.25 | 4 | 0.75 | 2 |"
     )
 
     assert report == "\n".join([header, separator, old_row, current_row])
@@ -169,7 +169,7 @@ def test_optional_numeric_zeroes_are_not_rendered_as_missing(tmp_path: Path) -> 
     report = compare_result_artifacts([path])
     row = report.splitlines()[2]
 
-    assert "| 0 | 0 | 0/0 | 0 | 0 | 0 | — | 0 |" in row
+    assert "| — | — | 0 | 0/0 | 0 | 0 | 0 | — | 0 |" in row
 
 
 def test_markdown_special_content_is_escaped_deterministically(tmp_path: Path) -> None:
@@ -188,7 +188,7 @@ def test_markdown_special_content_is_escaped_deterministically(tmp_path: Path) -
     assert len(report.splitlines()) == 3
 
 
-@pytest.mark.parametrize("schema", [0, 6, -1])
+@pytest.mark.parametrize("schema", [0, 7, -1])
 def test_unknown_schema_is_rejected_with_artifact_path(tmp_path: Path, schema: int) -> None:
     ComparisonError, compare_result_artifacts, _, _ = _api()
     path = _write(tmp_path / "unknown.json", _artifact(schema))

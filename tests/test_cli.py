@@ -151,13 +151,15 @@ def test_run_uses_temp_manifest_real_runner_and_writes_utf8_json(
     assert "\\u0434" not in raw
     assert raw.startswith("{\n  ")
     payload = json.loads(raw)
-    assert payload["schema_version"] == 5
+    assert payload["schema_version"] == 6
     assert payload["dataset"]["fingerprint"].startswith("sha256:")
     assert payload["channel"] == {
         "codec": "pcmu",
         "packet_loss_rate": 0.05,
         "frame_duration_ms": 20,
         "seed": 42,
+        "gain_db": 0.0,
+        "clip_threshold": None,
         "additive_noise_snr_db": None,
         "jitter_std_ms": None,
         "playout_buffer_ms": None,
@@ -265,4 +267,4 @@ def test_artifact_writer_uses_same_directory_atomic_replace(
     cli.write_result_artifact(_result(), output)
 
     assert seen and seen[0][1] == output
-    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == 5
+    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == 6

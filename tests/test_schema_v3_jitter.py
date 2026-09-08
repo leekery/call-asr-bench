@@ -97,7 +97,7 @@ def _result() -> BenchmarkResult:
 def test_current_schema_records_jitter_configuration() -> None:
     payload = result_to_dict(_result())
 
-    assert payload["schema_version"] == 5
+    assert payload["schema_version"] == 6
     assert payload["channel"]["jitter_std_ms"] == 8.0
     assert payload["channel"]["playout_buffer_ms"] == 20.0
 

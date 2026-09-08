@@ -19,6 +19,7 @@ The end-to-end runner supports:
 - strict UTF-8 JSONL dataset manifests with relative WAV paths;
 - uncompressed mono integer-PCM WAV loading;
 - clean-audio runs and deterministic 8 kHz G.711 PCMU / PCMA runs;
+- deterministic front-end gain and symmetric hard clipping;
 - deterministic SNR-controlled Gaussian additive noise;
 - deterministic frame-level packet loss with codec-correct silence substitution;
 - deterministic frame jitter modeled as late G.711 packet loss against a fixed
@@ -31,11 +32,11 @@ The end-to-end runner supports:
 - digit-form phone-number and numeric-entity preservation accuracy;
 - measured adapter time, real-time factor (RTF), and speed factor;
 - the `callasr run` CLI;
-- deterministic Markdown comparison of saved schema-v1 through schema-v5 artifacts with dataset identity checks;
+- deterministic Markdown comparison of saved schema-v1 through schema-v6 artifacts with dataset identity and front-end configuration checks;
 - atomic schema-versioned JSON artifacts.
 
-The lower-level Python API also includes deterministic gain and hard-clipping
-transforms. Gain/clipping is not yet wired into `callasr run`.
+Gain and symmetric hard clipping are available through both `callasr run` and
+the lower-level Python API.
 
 ## Install
 
@@ -169,6 +170,28 @@ round trip, server inference, and response parsing. RTF therefore measures
 observed endpoint latency/throughput from the benchmark client rather than only
 the server's internal model compute time.
 
+## Apply deterministic gain and clipping
+
+Use `--gain-db` to model a fixed front-end level change and `--clip-threshold` to
+model symmetric hard clipping before any acoustic noise or telephone-channel
+processing. Gain uses the amplitude conversion `10 ** (gain_db / 20)` and is
+applied first; clipping then limits samples to `[-threshold, +threshold]`.
+
+```bash
+uv run callasr run dataset/dataset.jsonl \
+  --adapter faster-whisper \
+  --model large-v3 \
+  --codec none \
+  --gain-db 6 \
+  --clip-threshold 0.8 \
+  --output runs/large-v3-front-end.json
+```
+
+There is no automatic normalization and no implicit clipping to `[-1, 1]` in
+this impairment. Omit `--clip-threshold` to disable hard clipping. The defaults
+`--gain-db 0` with no clip threshold preserve the earlier audio path exactly;
+the transform is not invoked at all in that configuration.
+
 ## Add deterministic acoustic noise
 
 Use `--snr-db` to add seeded zero-mean Gaussian noise before any telephone codec
@@ -194,9 +217,9 @@ seed for each utterance.
 
 ## Run a telephone-channel benchmark
 
-The same dataset can be passed through additive noise, G.711, packet loss, and
-late-frame jitter before transcription. The impairment pipeline is independent
-of which ASR adapter receives the resulting audio.
+The same dataset can be passed through front-end gain/clipping, additive noise,
+G.711, packet loss, and late-frame jitter before transcription. The impairment
+pipeline is independent of which ASR adapter receives the resulting audio.
 
 ```bash
 uv run callasr run dataset/dataset.jsonl \
@@ -223,6 +246,7 @@ The impairment order is fixed:
 
 ```text
 source WAV
+→ optional gain / hard clipping
 → optional additive noise
 → G.711 resample / encode
 → optional frame-level packet loss
@@ -284,15 +308,15 @@ metric is a preservation/recall-style score and does not penalize those extras.
 
 ## Result artifact
 
-Current `main` writes UTF-8 JSON with `schema_version` set to `5`. The main
+Current `main` writes UTF-8 JSON with `schema_version` set to `6`. The main
 sections are:
 
 - `dataset`: resolved manifest path, item count, and path-independent dataset fingerprint;
 - `adapter`: adapter name, model identifier, device, compute type, and decoding
   options;
-- `channel`: codec, packet-loss rate, frame duration, run seed, nullable
-  `additive_noise_snr_db`, nullable `jitter_std_ms`, and nullable
-  `playout_buffer_ms`;
+- `channel`: codec, packet-loss rate, frame duration, run seed, `gain_db`,
+  nullable `clip_threshold`, nullable `additive_noise_snr_db`, nullable
+  `jitter_std_ms`, and nullable `playout_buffer_ms`;
 - `summary`: corpus audio time, measured adapter time, WER, CER, RTF, speed
   factor, numeric-entity matches/reference count, and nullable micro-averaged
   numeric-entity accuracy;
@@ -312,7 +336,7 @@ Disabled optional impairments are represented by `null` channel fields. Jitter
 parameters are always either both set or both `null`.
 
 Published `v0.2.0` artifacts remain schema version 1 and published `v0.3.0`
-artifacts remain schema version 4. Current `main` writes schema version 5; published
+artifacts remain schema version 4. Current `main` writes schema version 6; published
 tags and their artifacts are not rewritten.
 
 Item audio paths are stored relative to the manifest when possible. JSON is
@@ -332,7 +356,7 @@ uv run callasr compare \
 ```
 
 The command writes a deterministic Markdown table to stdout. It accepts known
-call-asr-bench schema versions 1 through 5 and keeps the schema version visible
+call-asr-bench schema versions 1 through 6 and keeps the schema version visible
 for every row. WER, CER, RTF, and speed-factor definitions are compatible across
 those schema versions. Fields introduced later are not invented for older
 artifacts: SNR, jitter, or numeric-entity accuracy render as `—` when the source
@@ -342,6 +366,10 @@ Rows preserve command-line input order. Model names and artifact filenames are
 escaped so pipes or newlines cannot corrupt the Markdown table. Unknown schema
 versions, malformed fields, unreadable files, and invalid JSON fail with an
 artifact-path-qualified error instead of silently filling defaults.
+
+Schema v6 additionally records front-end gain/clipping. `callasr compare` shows
+explicit `Gain dB` and `Clip` columns; schema-v1 through schema-v5 artifacts render
+those fields as unavailable rather than assuming zero.
 
 Schema-v5 artifacts add `dataset.fingerprint` as a versioned SHA-256 identity.
 The fingerprint is order-sensitive and includes each item's `id`, reference text,
@@ -450,7 +478,6 @@ The current runner does not provide:
 
 - word-to-digit normalization for spoken numeric forms;
 - critical-entity scoring for names or addresses;
-- gain/clipping configuration through the runner or CLI;
 - provider-specific remote features beyond the common transcription contract;
 - a full RTP/adaptive jitter-buffer, packet reordering, duplication, or
   correlated network-delay simulation;

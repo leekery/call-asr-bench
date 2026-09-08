@@ -87,6 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--codec", choices=("none", "pcmu", "pcma"), default="none")
     run.add_argument("--packet-loss-rate", type=_probability, default=0.0)
     run.add_argument("--frame-duration-ms", type=_positive_int, default=20)
+    run.add_argument("--gain-db", type=_finite_float, default=0.0)
+    run.add_argument("--clip-threshold", type=_positive_float)
     run.add_argument("--snr-db", type=_finite_float)
     run.add_argument("--jitter-std-ms", type=_non_negative_float)
     run.add_argument("--playout-buffer-ms", type=_non_negative_float)
@@ -185,6 +187,8 @@ def _run(args: argparse.Namespace) -> int:
         codec=args.codec,
         packet_loss_rate=args.packet_loss_rate,
         frame_duration_ms=args.frame_duration_ms,
+        gain_db=args.gain_db,
+        clip_threshold=args.clip_threshold,
         snr_db=args.snr_db,
         jitter_std_ms=args.jitter_std_ms,
         playout_buffer_ms=args.playout_buffer_ms,

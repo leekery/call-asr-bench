@@ -53,7 +53,7 @@ def test_result_schema_serializes_to_versioned_json_ready_mapping() -> None:
 
     payload = result_to_dict(result)
 
-    assert payload["schema_version"] == 5
+    assert payload["schema_version"] == 6
     assert payload["dataset"] == {
         "path": "/tmp/dataset.jsonl",
         "item_count": 1,

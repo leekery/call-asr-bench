@@ -10,7 +10,7 @@ from math import isfinite
 from numbers import Real
 from pathlib import Path
 
-_KNOWN_SCHEMAS = {1, 2, 3, 4, 5}
+_KNOWN_SCHEMAS = {1, 2, 3, 4, 5, 6}
 _FINGERPRINT_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _MISSING = object()
 
@@ -27,6 +27,8 @@ class ComparisonRow:
     model: str
     codec: str
     packet_loss_rate: float
+    gain_db: float | None
+    clip_threshold: float | None
     snr_db: float | None
     jitter_std_ms: float | None
     playout_buffer_ms: float | None
@@ -91,7 +93,7 @@ def _item_count(dataset: dict[str, object], path: Path) -> int:
 def _schema_version(payload: dict[str, object], path: Path) -> int:
     value = payload.get("schema_version", _MISSING)
     if not isinstance(value, int) or isinstance(value, bool) or value not in _KNOWN_SCHEMAS:
-        raise _fail(path, "unsupported schema_version; expected one of 1, 2, 3, 4, 5")
+        raise _fail(path, "unsupported schema_version; expected one of 1, 2, 3, 4, 5, 6")
     return value
 
 
@@ -155,6 +157,15 @@ def _row_from_payload(path: Path, payload: dict[str, object]) -> ComparisonRow:
     )
     assert packet_loss is not None
 
+    gain_db = None
+    clip_threshold = None
+    if schema >= 6:
+        gain_db = _number(channel, "gain_db", path)
+        assert gain_db is not None
+        clip_threshold = _number(channel, "clip_threshold", path, optional=True)
+        if clip_threshold is not None and clip_threshold <= 0.0:
+            raise _fail(path, "clip_threshold must be a positive number")
+
     snr_db = None
     if schema >= 2:
         snr_db = _optional_channel_number(channel, "additive_noise_snr_db", path)
@@ -203,6 +214,8 @@ def _row_from_payload(path: Path, payload: dict[str, object]) -> ComparisonRow:
         model=_string(adapter, "model", path),
         codec=_codec(channel, path),
         packet_loss_rate=packet_loss,
+        gain_db=gain_db,
+        clip_threshold=clip_threshold,
         snr_db=snr_db,
         jitter_std_ms=jitter_std_ms,
         playout_buffer_ms=playout_buffer_ms,
@@ -256,10 +269,10 @@ def render_comparison_markdown(rows: Iterable[ComparisonRow]) -> str:
     """Render comparison rows as deterministic Markdown."""
 
     lines = [
-        "| Artifact | Schema | Adapter | Model | Codec | Loss | SNR dB | Jitter ms | "
-        "WER | CER | RTF | Speed | Numeric entity | Items |",
-        "| --- | ---: | --- | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | "
-        "---: | ---: | ---: |",
+        "| Artifact | Schema | Adapter | Model | Codec | Loss | Gain dB | Clip | SNR dB | "
+        "Jitter ms | WER | CER | RTF | Speed | Numeric entity | Items |",
+        "| --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | "
+        "---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         jitter = (
@@ -274,6 +287,8 @@ def render_comparison_markdown(rows: Iterable[ComparisonRow]) -> str:
             _cell(row.model),
             _cell(row.codec),
             _number_text(row.packet_loss_rate),
+            _number_text(row.gain_db),
+            _number_text(row.clip_threshold),
             _number_text(row.snr_db),
             jitter,
             _number_text(row.wer),
