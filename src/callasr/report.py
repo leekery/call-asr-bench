@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from math import isfinite
 from numbers import Real
 from pathlib import Path
 
-_KNOWN_SCHEMAS = {1, 2, 3, 4}
+_KNOWN_SCHEMAS = {1, 2, 3, 4, 5}
+_FINGERPRINT_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _MISSING = object()
 
 
@@ -34,6 +36,7 @@ class ComparisonRow:
     speed_factor: float | None
     numeric_entity_accuracy: float | None
     item_count: int
+    dataset_fingerprint: str | None
 
 
 def _fail(path: Path, message: str) -> ComparisonError:
@@ -88,7 +91,20 @@ def _item_count(dataset: dict[str, object], path: Path) -> int:
 def _schema_version(payload: dict[str, object], path: Path) -> int:
     value = payload.get("schema_version", _MISSING)
     if not isinstance(value, int) or isinstance(value, bool) or value not in _KNOWN_SCHEMAS:
-        raise _fail(path, "unsupported schema_version; expected one of 1, 2, 3, 4")
+        raise _fail(path, "unsupported schema_version; expected one of 1, 2, 3, 4, 5")
+    return value
+
+
+def _dataset_fingerprint(
+    dataset: dict[str, object],
+    schema: int,
+    path: Path,
+) -> str | None:
+    if schema < 5:
+        return None
+    value = dataset.get("fingerprint", _MISSING)
+    if not isinstance(value, str) or _FINGERPRINT_PATTERN.fullmatch(value) is None:
+        raise _fail(path, "dataset fingerprint must be lowercase sha256:<64 hex digits>")
     return value
 
 
@@ -196,7 +212,20 @@ def _row_from_payload(path: Path, payload: dict[str, object]) -> ComparisonRow:
         speed_factor=speed_factor,
         numeric_entity_accuracy=numeric_entity_accuracy,
         item_count=_item_count(dataset, path),
+        dataset_fingerprint=_dataset_fingerprint(dataset, schema, path),
     )
+
+
+def _validate_dataset_identity(rows: tuple[ComparisonRow, ...]) -> None:
+    known = [row for row in rows if row.dataset_fingerprint is not None]
+    if len(known) < 2:
+        return
+    first = known[0]
+    for row in known[1:]:
+        if row.dataset_fingerprint != first.dataset_fingerprint:
+            raise ComparisonError(
+                f"dataset fingerprint mismatch between {first.artifact} and {row.artifact}"
+            )
 
 
 def load_comparison_rows(paths: Iterable[str | Path]) -> tuple[ComparisonRow, ...]:
@@ -206,7 +235,9 @@ def load_comparison_rows(paths: Iterable[str | Path]) -> tuple[ComparisonRow, ..
     for raw_path in paths:
         path = Path(raw_path).expanduser()
         rows.append(_row_from_payload(path, _load_payload(path)))
-    return tuple(rows)
+    result = tuple(rows)
+    _validate_dataset_identity(result)
+    return result
 
 
 def _number_text(value: float | None) -> str:

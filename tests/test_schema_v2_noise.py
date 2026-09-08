@@ -20,6 +20,8 @@ from callasr.benchmark import (
 )
 from callasr.dataset import DatasetItem
 
+_FINGERPRINT = "sha256:" + "0" * 64
+
 
 class FakeAdapter:
     name = "fake"
@@ -51,7 +53,11 @@ def _item(tmp_path: Path, index: int = 0) -> DatasetItem:
 def _result(additive_noise_snr_db: float | None) -> BenchmarkResult:
     return BenchmarkResult(
         created_at="2026-09-04T18:00:00+00:00",
-        dataset=DatasetInfo(path="/tmp/dataset.jsonl", item_count=1),
+        dataset=DatasetInfo(
+            path="/tmp/dataset.jsonl",
+            item_count=1,
+            fingerprint=_FINGERPRINT,
+        ),
         adapter=AdapterInfo(
             name="fake",
             model="fake-model",
@@ -93,7 +99,7 @@ def _result(additive_noise_snr_db: float | None) -> BenchmarkResult:
 def test_current_schema_keeps_nullable_additive_noise_metadata() -> None:
     payload = result_to_dict(_result(None))
 
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert payload["channel"]["additive_noise_snr_db"] is None
 
 

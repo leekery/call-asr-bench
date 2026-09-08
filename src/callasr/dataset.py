@@ -1,13 +1,17 @@
-"""Dataset manifest parsing and validation."""
+"""Dataset manifest parsing, validation, and identity fingerprinting."""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
 _REQUIRED_FIELDS = ("id", "audio", "reference")
 _ALLOWED_FIELDS = frozenset((*_REQUIRED_FIELDS, "language"))
+_FINGERPRINT_DOMAIN = b"call-asr-bench-dataset-v1\x00"
+_FINGERPRINT_CHUNK_BYTES = 1024 * 1024
 
 
 class DatasetError(ValueError):
@@ -137,3 +141,31 @@ def load_dataset_manifest(path: str | Path) -> tuple[DatasetItem, ...]:
         items.append(_parse_item(manifest_path, line_number, value, seen_ids))
 
     return tuple(items)
+
+
+def _update_fingerprint_field(hasher, value: bytes) -> None:
+    hasher.update(len(value).to_bytes(8, "big"))
+    hasher.update(value)
+
+
+def _audio_sha256(path: Path) -> bytes:
+    hasher = sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(_FINGERPRINT_CHUNK_BYTES):
+            hasher.update(chunk)
+    return hasher.digest()
+
+
+def dataset_fingerprint(items: Sequence[DatasetItem]) -> str:
+    """Return a path-independent, order-sensitive fingerprint of benchmark inputs."""
+
+    hasher = sha256()
+    hasher.update(_FINGERPRINT_DOMAIN)
+    hasher.update(len(items).to_bytes(8, "big"))
+    for item in items:
+        _update_fingerprint_field(hasher, item.id.encode("utf-8"))
+        _update_fingerprint_field(hasher, item.reference.encode("utf-8"))
+        language = b"\x00" if item.language is None else b"\x01" + item.language.encode("ascii")
+        _update_fingerprint_field(hasher, language)
+        _update_fingerprint_field(hasher, _audio_sha256(item.audio))
+    return f"sha256:{hasher.hexdigest()}"

@@ -31,7 +31,7 @@ The end-to-end runner supports:
 - digit-form phone-number and numeric-entity preservation accuracy;
 - measured adapter time, real-time factor (RTF), and speed factor;
 - the `callasr run` CLI;
-- deterministic Markdown comparison of saved schema-v1 through schema-v4 artifacts;
+- deterministic Markdown comparison of saved schema-v1 through schema-v5 artifacts with dataset identity checks;
 - atomic schema-versioned JSON artifacts.
 
 The lower-level Python API also includes deterministic gain and hard-clipping
@@ -284,10 +284,10 @@ metric is a preservation/recall-style score and does not penalize those extras.
 
 ## Result artifact
 
-Current `main` writes UTF-8 JSON with `schema_version` set to `4`. The main
+Current `main` writes UTF-8 JSON with `schema_version` set to `5`. The main
 sections are:
 
-- `dataset`: resolved manifest path and item count;
+- `dataset`: resolved manifest path, item count, and path-independent dataset fingerprint;
 - `adapter`: adapter name, model identifier, device, compute type, and decoding
   options;
 - `channel`: codec, packet-loss rate, frame duration, run seed, nullable
@@ -311,9 +311,9 @@ For `openai-compatible`, `adapter.device` is `remote`, `compute_type` is
 Disabled optional impairments are represented by `null` channel fields. Jitter
 parameters are always either both set or both `null`.
 
-The published `v0.2.0` tag remains the schema-version-1 release. Schema version
-4 is the current unreleased development contract on `main`; the old release and
-its artifacts are not rewritten.
+Published `v0.2.0` artifacts remain schema version 1 and published `v0.3.0`
+artifacts remain schema version 4. Current `main` writes schema version 5; published
+tags and their artifacts are not rewritten.
 
 Item audio paths are stored relative to the manifest when possible. JSON is
 pretty-printed with two-space indentation and preserves non-ASCII text rather
@@ -332,7 +332,7 @@ uv run callasr compare \
 ```
 
 The command writes a deterministic Markdown table to stdout. It accepts known
-call-asr-bench schema versions 1 through 4 and keeps the schema version visible
+call-asr-bench schema versions 1 through 5 and keeps the schema version visible
 for every row. WER, CER, RTF, and speed-factor definitions are compatible across
 those schema versions. Fields introduced later are not invented for older
 artifacts: SNR, jitter, or numeric-entity accuracy render as `—` when the source
@@ -343,12 +343,16 @@ escaped so pipes or newlines cannot corrupt the Markdown table. Unknown schema
 versions, malformed fields, unreadable files, and invalid JSON fail with an
 artifact-path-qualified error instead of silently filling defaults.
 
-Current artifacts record the manifest path and item count, but they do **not**
-contain a dataset content fingerprint. Therefore `callasr compare` cannot prove
-that two same-size manifests contain identical samples. The table always shows
-the item count, and users remain responsible for comparing runs produced from
-equivalent datasets. A future result schema can add a dataset fingerprint rather
-than pretending the current artifacts provide one.
+Schema-v5 artifacts add `dataset.fingerprint` as a versioned SHA-256 identity.
+The fingerprint is order-sensitive and includes each item's `id`, reference text,
+optional language, and the SHA-256 digest of the exact source WAV bytes. Absolute
+manifest locations and audio pathnames are excluded, so moving or renaming an
+otherwise identical dataset does not change its identity.
+
+When `callasr compare` receives two or more artifacts with known schema-v5
+fingerprints, all known fingerprints must match; a mismatch is a hard error rather
+than a potentially misleading table. Schema-v1 through schema-v4 artifacts remain
+readable, but they do not contain enough information to prove dataset identity.
 
 ### Metrics
 
@@ -444,7 +448,6 @@ print(entities.accuracy)  # 1.0
 
 The current runner does not provide:
 
-- dataset content fingerprints for automatic cross-run identity checks;
 - word-to-digit normalization for spoken numeric forms;
 - critical-entity scoring for names or addresses;
 - gain/clipping configuration through the runner or CLI;

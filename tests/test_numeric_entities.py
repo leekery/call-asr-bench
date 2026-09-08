@@ -21,6 +21,8 @@ from callasr.benchmark import (
 from callasr.dataset import DatasetItem
 from callasr.metrics.wer import character_error_rate, word_error_rate
 
+_FINGERPRINT = "sha256:" + "0" * 64
+
 
 def _entities_api():
     try:
@@ -168,7 +170,7 @@ def test_no_reference_entities_has_null_accuracy_and_keeps_hypothesis_extras() -
     assert score.accuracy is None
 
 
-def test_current_result_schema_is_v4_and_entity_fields_are_json_ready() -> None:
+def test_current_result_schema_is_v5_and_entity_fields_are_json_ready() -> None:
     NumericEntity, NumericEntityScore, _, _ = _entities_api()
     entity_score = NumericEntityScore(
         reference=(NumericEntity(kind="number", surface="0042", canonical="0042"),),
@@ -179,7 +181,11 @@ def test_current_result_schema_is_v4_and_entity_fields_are_json_ready() -> None:
     )
     result = BenchmarkResult(
         created_at="2026-09-05T20:00:00+00:00",
-        dataset=DatasetInfo(path="/tmp/dataset.jsonl", item_count=1),
+        dataset=DatasetInfo(
+            path="/tmp/dataset.jsonl",
+            item_count=1,
+            fingerprint=_FINGERPRINT,
+        ),
         adapter=AdapterInfo(
             name="fake",
             model="fake-model",
@@ -222,7 +228,8 @@ def test_current_result_schema_is_v4_and_entity_fields_are_json_ready() -> None:
 
     payload = result_to_dict(result)
 
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
+    assert payload["dataset"]["fingerprint"] == _FINGERPRINT
     assert payload["summary"]["numeric_entity_reference_count"] == 1
     assert payload["summary"]["numeric_entity_accuracy"] == 0.0
     assert payload["items"][0]["numeric_entities"]["reference"][0] == {

@@ -12,7 +12,7 @@ import numpy as np
 
 from callasr.adapters.base import ASRAdapter
 from callasr.audio import apply_additive_noise, telephone_channel
-from callasr.dataset import load_dataset_manifest
+from callasr.dataset import DatasetError, dataset_fingerprint, load_dataset_manifest
 from callasr.io import load_wav
 from callasr.metrics.entities import NumericEntityScore, score_numeric_entities
 from callasr.metrics.wer import character_error_counts, micro_average, word_error_counts
@@ -24,6 +24,7 @@ JsonScalar = str | int | float | bool | None
 class DatasetInfo:
     path: str
     item_count: int
+    fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +76,7 @@ class ItemResult:
 
 @dataclass(frozen=True, slots=True)
 class BenchmarkResult:
-    schema_version: int = field(default=4, init=False)
+    schema_version: int = field(default=5, init=False)
     created_at: str
     dataset: DatasetInfo
     adapter: AdapterInfo
@@ -142,6 +143,11 @@ def run_benchmark(
     _validate_jitter_configuration(codec, jitter_std_ms, playout_buffer_ms)
     resolved_manifest = Path(manifest_path).expanduser().resolve()
     dataset_items = load_dataset_manifest(resolved_manifest)
+    try:
+        fingerprint = dataset_fingerprint(dataset_items)
+    except OSError as exc:
+        raise DatasetError(resolved_manifest, f"cannot fingerprint dataset audio: {exc}") from exc
+
     item_results: list[ItemResult] = []
     word_counts = []
     character_counts = []
@@ -221,7 +227,11 @@ def run_benchmark(
     )
     return BenchmarkResult(
         created_at=datetime.now(timezone.utc).isoformat(),
-        dataset=DatasetInfo(path=str(resolved_manifest), item_count=len(dataset_items)),
+        dataset=DatasetInfo(
+            path=str(resolved_manifest),
+            item_count=len(dataset_items),
+            fingerprint=fingerprint,
+        ),
         adapter=AdapterInfo(
             name=adapter.name,
             model=adapter.model,
