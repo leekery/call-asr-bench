@@ -121,7 +121,9 @@ def test_adapter_metadata_protocol_and_http_to_ws_normalization() -> None:
 
 def test_https_base_url_uses_wss_endpoint() -> None:
     module = _api()
-    connection = FakeConnection([_event("session.created"), _event("transcription.done", text="ok")])
+    connection = FakeConnection(
+        [_event("session.created"), _event("transcription.done", text="ok")]
+    )
     factory = FakeConnectFactory(connection)
     adapter = module.VLLMRealtimeAdapter(
         "model",
@@ -311,14 +313,16 @@ def test_malformed_protocol_messages_are_actionable(incoming: list[object]) -> N
 
 def test_socket_close_before_done_is_actionable() -> None:
     module = _api()
-    connection = FakeConnection([_event("session.created"), _event("transcription.delta", delta="hi")])
+    connection = FakeConnection(
+        [_event("session.created"), _event("transcription.delta", delta="hi")]
+    )
     adapter = module.VLLMRealtimeAdapter(
         "model",
         base_url="http://localhost:8000/v1",
         connect_factory=FakeConnectFactory(connection),
     )
 
-    with pytest.raises(module.VLLMRealtimeError, match="before transcription.done"):
+    with pytest.raises(module.VLLMRealtimeError, match=r"before transcription\.done"):
         list(adapter.stream([_frame([0.0])]))
 
 
