@@ -10,7 +10,6 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
-from callasr.audio import AudioBuffer
 from callasr.report import ComparisonError, compare_result_artifacts
 from callasr.streaming import StreamingUpdate
 
@@ -97,7 +96,9 @@ class ScriptedAdapter:
         self.clock.advance(0.05)
 
 
-def test_streaming_dataset_runner_aggregates_exact_metrics_in_manifest_order(tmp_path: Path) -> None:
+def test_streaming_dataset_runner_aggregates_exact_metrics_in_manifest_order(
+    tmp_path: Path,
+) -> None:
     dataset_module, _ = _api()
     manifest = _write_manifest(tmp_path)
     clock = FakeClock()
@@ -122,9 +123,10 @@ def test_streaming_dataset_runner_aggregates_exact_metrics_in_manifest_order(tmp
     assert [item.frame_count for item in result.items] == [1, 1, 1]
     assert [item.final_text for item in result.items] == ["a", "b", "x y"]
     assert [item.partial_update_count for item in result.items] == [1, 0, 1]
-    assert [item.time_to_first_partial_seconds for item in result.items] == pytest.approx(
-        [0.1, None, 0.3], nan_ok=True
-    )
+    ttft = [item.time_to_first_partial_seconds for item in result.items]
+    assert ttft[0] == pytest.approx(0.1)
+    assert ttft[1] is None
+    assert ttft[2] == pytest.approx(0.3)
     assert [item.finalization_latency_seconds for item in result.items] == pytest.approx(
         [0.2, 0.4, 0.6]
     )
