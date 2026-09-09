@@ -166,9 +166,7 @@ def run_concurrent_benchmark(
 
     latencies = [item.latency_seconds for item in results]
     total_audio_seconds = sum(item.audio_seconds for item in results)
-    throughput = (
-        None if total_wall_seconds == 0.0 else total_audio_seconds / total_wall_seconds
-    )
+    throughput = None if total_wall_seconds == 0.0 else total_audio_seconds / total_wall_seconds
     return ConcurrentBenchmarkResult(
         concurrency=concurrency,
         item_count=len(dataset_items),
