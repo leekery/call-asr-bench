@@ -41,6 +41,13 @@ from callasr.streaming import (
     partial_stability_score,
     run_streaming_benchmark,
 )
+from callasr.streaming_dataset import (
+    StreamingDatasetError,
+    StreamingDatasetItemResult,
+    StreamingDatasetResult,
+    StreamingDatasetSummary,
+    run_streaming_dataset_benchmark,
+)
 
 __all__ = [
     "AudioBuffer",
@@ -53,6 +60,10 @@ __all__ = [
     "ObservedStreamingUpdate",
     "StreamingASRAdapter",
     "StreamingBenchmarkResult",
+    "StreamingDatasetError",
+    "StreamingDatasetItemResult",
+    "StreamingDatasetResult",
+    "StreamingDatasetSummary",
     "StreamingError",
     "StreamingUpdate",
     "VLLMRealtimeAdapter",
@@ -73,6 +84,7 @@ __all__ = [
     "resample",
     "run_concurrent_benchmark",
     "run_streaming_benchmark",
+    "run_streaming_dataset_benchmark",
     "score_numeric_entities",
     "telephone_channel",
     "word_error_counts",

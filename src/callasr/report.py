@@ -142,8 +142,11 @@ def _load_payload(path: Path) -> dict[str, object]:
 
 
 def _row_from_payload(path: Path, payload: dict[str, object]) -> ComparisonRow:
-    if payload.get("kind") == "concurrent":
+    artifact_kind = payload.get("kind")
+    if artifact_kind == "concurrent":
         raise _fail(path, "concurrent artifacts are not supported by batch comparison")
+    if artifact_kind == "streaming":
+        raise _fail(path, "streaming artifacts are not supported by batch comparison")
     schema = _schema_version(payload, path)
     dataset = _mapping(payload, "dataset", path)
     adapter = _mapping(payload, "adapter", path)
