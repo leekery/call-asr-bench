@@ -3,14 +3,12 @@ from __future__ import annotations
 import base64
 import importlib
 import json
-from collections.abc import Iterable
-from typing import ClassVar
 
 import numpy as np
 import pytest
 
 from callasr.audio import AudioBuffer
-from callasr.streaming import StreamingASRAdapter, frame_audio, run_streaming_benchmark
+from callasr.streaming import StreamingASRAdapter, run_streaming_benchmark
 
 
 def _api():
