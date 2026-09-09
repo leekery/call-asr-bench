@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from callasr.adapters.base import AdapterOption
-from callasr.streaming_dataset import StreamingDatasetResult
+from callasr.streaming_dataset import (
+    StreamingDatasetItemResult,
+    StreamingDatasetResult,
+    StreamingDatasetSummary,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,8 +41,8 @@ class StreamingArtifact:
     dataset: StreamingDatasetInfo
     adapter: StreamingAdapterInfo
     streaming: StreamingConfigInfo
-    summary: object
-    items: tuple[object, ...]
+    summary: StreamingDatasetSummary
+    items: tuple[StreamingDatasetItemResult, ...]
     kind: str = field(default="streaming", init=False)
     schema_version: int = field(default=1, init=False)
     timing_mode: str = field(default="file_upload", init=False)
