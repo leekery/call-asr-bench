@@ -8,6 +8,12 @@ from callasr.audio import (
     telephone_channel,
 )
 from callasr.codecs.g711 import decode_g711, encode_g711
+from callasr.concurrent import (
+    ConcurrentBenchmarkError,
+    ConcurrentBenchmarkResult,
+    ConcurrentItemResult,
+    run_concurrent_benchmark,
+)
 from callasr.impairments import apply_jitter_loss, apply_packet_loss
 from callasr.metrics.entities import (
     NumericEntity,
@@ -37,6 +43,9 @@ from callasr.streaming import (
 
 __all__ = [
     "AudioBuffer",
+    "ConcurrentBenchmarkError",
+    "ConcurrentBenchmarkResult",
+    "ConcurrentItemResult",
     "ErrorCounts",
     "NumericEntity",
     "NumericEntityScore",
@@ -59,6 +68,7 @@ __all__ = [
     "normalize_text",
     "partial_stability_score",
     "resample",
+    "run_concurrent_benchmark",
     "run_streaming_benchmark",
     "score_numeric_entities",
     "telephone_channel",
