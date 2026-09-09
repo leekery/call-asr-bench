@@ -38,7 +38,12 @@ def _write_manifest(tmp_path: Path, *, language: str | None) -> Path:
     return manifest
 
 
-def _result(manifest: Path, *, frame_duration_ms: int, language_mode: str) -> StreamingDatasetResult:
+def _result(
+    manifest: Path,
+    *,
+    frame_duration_ms: int,
+    language_mode: str,
+) -> StreamingDatasetResult:
     item = StreamingDatasetItemResult(
         id="call-1",
         audio="audio.wav",
@@ -298,12 +303,10 @@ def test_untagged_manifest_allows_default_manifest_language_mode(
     manifest = _write_manifest(tmp_path, language=None)
     seen_modes: list[str] = []
 
-    monkeypatch.setattr(
-        cli,
-        "VLLMRealtimeAdapter",
-        lambda model, **kwargs: FakeVLLMAdapter(model, kwargs["base_url"], kwargs["timeout_seconds"]),
-        raising=False,
-    )
+    def constructor(model: str, **kwargs):
+        return FakeVLLMAdapter(model, kwargs["base_url"], kwargs["timeout_seconds"])
+
+    monkeypatch.setattr(cli, "VLLMRealtimeAdapter", constructor, raising=False)
 
     def fake_runner(manifest_path, adapter, *, frame_duration_ms, language_mode, clock=None):
         seen_modes.append(language_mode)
@@ -374,12 +377,10 @@ def test_streaming_runner_failure_does_not_replace_existing_artifact(
     output = tmp_path / "result.json"
     output.write_text("old\n", encoding="utf-8")
 
-    monkeypatch.setattr(
-        cli,
-        "VLLMRealtimeAdapter",
-        lambda model, **kwargs: FakeVLLMAdapter(model, kwargs["base_url"], kwargs["timeout_seconds"]),
-        raising=False,
-    )
+    def constructor(model: str, **kwargs):
+        return FakeVLLMAdapter(model, kwargs["base_url"], kwargs["timeout_seconds"])
+
+    monkeypatch.setattr(cli, "VLLMRealtimeAdapter", constructor, raising=False)
 
     def fail_runner(*args, **kwargs):
         raise cli.StreamingDatasetError("stream failed")
