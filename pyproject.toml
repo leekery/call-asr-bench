@@ -36,6 +36,9 @@ faster-whisper = [
 openai-compatible = [
     "httpx>=0.28,<1",
 ]
+vllm-realtime = [
+    "websockets>=14,<17",
+]
 
 [project.scripts]
 callasr = "callasr.cli:main"
