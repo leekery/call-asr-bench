@@ -1,0 +1,45 @@
+name: Fix concurrent contract test lint
+
+on:
+  push:
+    branches:
+      - feat/concurrent-benchmark-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Apply mechanical test fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/test_concurrent.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        lines.append(\n            '{"id":"item-%d","audio":"item-%d.wav","reference":"ref %d","language":"%s"}'\n            % (index, index, index, language)\n        )'''
+          new = '''        lines.append(\n            f'{{"id":"item-{index}","audio":"item-{index}.wav",'\n            f'"reference":"ref {index}","language":"{language}"}}'\n        )'''
+          if text.count(old) != 1:
+              raise SystemExit('manifest formatting block not found')
+          text = text.replace(old, new, 1)
+          old = '''    try:\n        from callasr import (\n            ConcurrentBenchmarkError as PublicError,\n            ConcurrentBenchmarkResult as PublicResult,\n            ConcurrentItemResult as PublicItem,\n            run_concurrent_benchmark as public_run,\n        )\n    except ImportError as exc:\n        pytest.fail(f"public concurrent API is missing: {exc}")\n\n    assert PublicError is ConcurrentBenchmarkError\n    assert PublicResult is ConcurrentBenchmarkResult\n    assert PublicItem is ConcurrentItemResult\n    assert public_run is run_concurrent_benchmark'''
+          new = '''    import callasr\n\n    assert callasr.ConcurrentBenchmarkError is ConcurrentBenchmarkError\n    assert callasr.ConcurrentBenchmarkResult is ConcurrentBenchmarkResult\n    assert callasr.ConcurrentItemResult is ConcurrentItemResult\n    assert callasr.run_concurrent_benchmark is run_concurrent_benchmark'''
+          if text.count(old) != 1:
+              raise SystemExit('public API import block not found')
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              'int(round(float(audio.samples[0]) * 10))',
+              'round(float(audio.samples[0]) * 10)',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit test fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_concurrent.py
+          git commit -m "test: fix concurrent contract test lint"
+          git push
