@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from math import isfinite
 from pathlib import Path
 
@@ -15,7 +15,14 @@ from callasr.adapters.base import AdapterError, ASRAdapter
 from callasr.adapters.faster_whisper import FasterWhisperAdapter
 from callasr.adapters.openai_compatible import OpenAICompatibleAdapter
 from callasr.benchmark import BenchmarkResult, result_to_dict, run_benchmark
-from callasr.dataset import DatasetError
+from callasr.concurrent import ConcurrentBenchmarkError, run_concurrent_benchmark
+from callasr.concurrent_artifact import (
+    ConcurrentAdapterInfo,
+    ConcurrentArtifact,
+    build_concurrent_artifact,
+    concurrent_artifact_to_dict,
+)
+from callasr.dataset import DatasetError, dataset_fingerprint, load_dataset_manifest
 from callasr.io import AudioError
 from callasr.report import ComparisonError, compare_result_artifacts
 
@@ -70,6 +77,20 @@ def _non_negative_int(value: str) -> int:
     return parsed
 
 
+def _add_adapter_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--adapter",
+        choices=("faster-whisper", "openai-compatible"),
+        required=True,
+    )
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--compute-type", default="default")
+    parser.add_argument("--base-url")
+    parser.add_argument("--api-key")
+    parser.add_argument("--timeout-seconds", type=_positive_float, default=60.0)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the public command-line parser."""
 
@@ -78,12 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = subparsers.add_parser("run", help="run a sequential ASR benchmark")
     run.add_argument("manifest")
-    run.add_argument(
-        "--adapter",
-        choices=("faster-whisper", "openai-compatible"),
-        required=True,
-    )
-    run.add_argument("--model", required=True)
+    _add_adapter_arguments(run)
     run.add_argument("--codec", choices=("none", "pcmu", "pcma"), default="none")
     run.add_argument("--packet-loss-rate", type=_probability, default=0.0)
     run.add_argument("--frame-duration-ms", type=_positive_int, default=20)
@@ -94,25 +110,19 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--playout-buffer-ms", type=_non_negative_float)
     run.add_argument("--seed", type=_non_negative_int, default=0)
     run.add_argument("--output", required=True)
-    run.add_argument("--device", default="auto")
-    run.add_argument("--compute-type", default="default")
-    run.add_argument("--base-url")
-    run.add_argument("--api-key")
-    run.add_argument("--timeout-seconds", type=_positive_float, default=60.0)
+
+    concurrent = subparsers.add_parser("concurrent", help="run a concurrent ASR load benchmark")
+    concurrent.add_argument("manifest")
+    _add_adapter_arguments(concurrent)
+    concurrent.add_argument("--concurrency", type=_positive_int, required=True)
+    concurrent.add_argument("--output", required=True)
 
     compare = subparsers.add_parser("compare", help="compare saved benchmark artifacts")
     compare.add_argument("results", nargs="+")
     return parser
 
 
-def _validate_configuration(args: argparse.Namespace) -> None:
-    if args.codec == "none" and args.packet_loss_rate != 0.0:
-        raise ConfigurationError("packet-loss-rate must be zero when codec is none")
-    if (args.jitter_std_ms is None) != (args.playout_buffer_ms is None):
-        raise ConfigurationError("jitter-std-ms and playout-buffer-ms must be provided together")
-    if args.jitter_std_ms is not None and args.codec == "none":
-        raise ConfigurationError("jitter requires codec pcmu or pcma")
-
+def _validate_adapter_configuration(args: argparse.Namespace) -> None:
     if args.adapter == "openai-compatible":
         if args.base_url is None:
             raise ConfigurationError("base-url is required with adapter openai-compatible")
@@ -123,6 +133,25 @@ def _validate_configuration(args: argparse.Namespace) -> None:
         )
 
 
+def _validate_configuration(args: argparse.Namespace) -> None:
+    if args.codec == "none" and args.packet_loss_rate != 0.0:
+        raise ConfigurationError("packet-loss-rate must be zero when codec is none")
+    if (args.jitter_std_ms is None) != (args.playout_buffer_ms is None):
+        raise ConfigurationError("jitter-std-ms and playout-buffer-ms must be provided together")
+    if args.jitter_std_ms is not None and args.codec == "none":
+        raise ConfigurationError("jitter requires codec pcmu or pcma")
+    _validate_adapter_configuration(args)
+
+
+def _resolved_api_key(args: argparse.Namespace) -> str | None:
+    api_key = args.api_key
+    if api_key is None:
+        api_key = os.environ.get("CALLASR_API_KEY")
+    if api_key is None:
+        api_key = os.environ.get("OPENAI_API_KEY")
+    return api_key
+
+
 def _build_adapter(args: argparse.Namespace) -> ASRAdapter:
     if args.adapter == "faster-whisper":
         return FasterWhisperAdapter(
@@ -131,23 +160,60 @@ def _build_adapter(args: argparse.Namespace) -> ASRAdapter:
             compute_type=args.compute_type,
         )
     if args.adapter == "openai-compatible":
-        api_key = args.api_key
-        if api_key is None:
-            api_key = os.environ.get("CALLASR_API_KEY")
-        if api_key is None:
-            api_key = os.environ.get("OPENAI_API_KEY")
         return OpenAICompatibleAdapter(
             args.model,
             base_url=args.base_url,
+            api_key=_resolved_api_key(args),
+            timeout_seconds=args.timeout_seconds,
+        )
+    raise ConfigurationError(f"unsupported adapter: {args.adapter}")
+
+
+def _concurrent_adapter_factory(args: argparse.Namespace) -> Callable[[], ASRAdapter]:
+    if args.adapter == "faster-whisper":
+        return lambda: FasterWhisperAdapter(
+            args.model,
+            device=args.device,
+            compute_type=args.compute_type,
+        )
+    if args.adapter == "openai-compatible":
+        api_key = _resolved_api_key(args)
+        base_url = args.base_url.rstrip("/")
+        return lambda: OpenAICompatibleAdapter(
+            args.model,
+            base_url=base_url,
             api_key=api_key,
             timeout_seconds=args.timeout_seconds,
         )
     raise ConfigurationError(f"unsupported adapter: {args.adapter}")
 
 
-def write_result_artifact(result: BenchmarkResult, path: str | Path) -> None:
-    """Write a complete benchmark result with same-directory atomic replacement."""
+def _concurrent_adapter_info(args: argparse.Namespace) -> ConcurrentAdapterInfo:
+    if args.adapter == "faster-whisper":
+        return ConcurrentAdapterInfo(
+            name="faster-whisper",
+            model=args.model,
+            device=args.device,
+            compute_type=args.compute_type,
+            options={"beam_size": 5, "temperature": 0.0},
+        )
+    if args.adapter == "openai-compatible":
+        return ConcurrentAdapterInfo(
+            name="openai-compatible",
+            model=args.model,
+            device="remote",
+            compute_type="server",
+            options={
+                "base_url": args.base_url.rstrip("/"),
+                "timeout_seconds": args.timeout_seconds,
+                "response_format": "json",
+                "upload_format": "wav_pcm16",
+            },
+        )
+    raise ConfigurationError(f"unsupported adapter: {args.adapter}")
 
+
+def _write_json_artifact(payload: dict[str, object], path: str | Path) -> None:
     output_path = Path(path).expanduser()
     temporary_path: Path | None = None
     try:
@@ -162,7 +228,7 @@ def write_result_artifact(result: BenchmarkResult, path: str | Path) -> None:
             delete=False,
         ) as handle:
             temporary_path = Path(handle.name)
-            json.dump(result_to_dict(result), handle, ensure_ascii=False, indent=2)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
@@ -176,6 +242,18 @@ def write_result_artifact(result: BenchmarkResult, path: str | Path) -> None:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
         raise
+
+
+def write_result_artifact(result: BenchmarkResult, path: str | Path) -> None:
+    """Write a complete benchmark result with same-directory atomic replacement."""
+
+    _write_json_artifact(result_to_dict(result), path)
+
+
+def write_concurrent_artifact(result: ConcurrentArtifact, path: str | Path) -> None:
+    """Write a complete concurrent result with same-directory atomic replacement."""
+
+    _write_json_artifact(concurrent_artifact_to_dict(result), path)
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -198,6 +276,28 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _concurrent(args: argparse.Namespace) -> int:
+    _validate_adapter_configuration(args)
+    manifest_path = Path(args.manifest).expanduser().resolve()
+    items = load_dataset_manifest(manifest_path)
+    fingerprint = dataset_fingerprint(items)
+    adapter_info = _concurrent_adapter_info(args)
+    adapter_factory = _concurrent_adapter_factory(args)
+    result = run_concurrent_benchmark(
+        manifest_path,
+        adapter_factory,
+        concurrency=args.concurrency,
+    )
+    artifact = build_concurrent_artifact(
+        result,
+        manifest_path=manifest_path,
+        fingerprint=fingerprint,
+        adapter=adapter_info,
+    )
+    write_concurrent_artifact(artifact, args.output)
+    return 0
+
+
 def _compare(args: argparse.Namespace) -> int:
     print(compare_result_artifacts(args.results))
     return 0
@@ -210,12 +310,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "run":
             return _run(args)
+        if args.command == "concurrent":
+            return _concurrent(args)
         if args.command == "compare":
             return _compare(args)
     except (
         DatasetError,
         AudioError,
         AdapterError,
+        ConcurrentBenchmarkError,
         ConfigurationError,
         ArtifactError,
         ComparisonError,
