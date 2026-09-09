@@ -208,9 +208,14 @@ def test_concurrent_cli_passes_lazy_factory_and_writes_faster_whisper_artifact(
 @pytest.mark.parametrize(
     ("explicit_key", "callasr_key", "openai_key", "expected"),
     [
-        ("explicit", "callasr", "openai", "explicit"),
-        (None, "callasr", "openai", "callasr"),
-        (None, None, "openai", "openai"),
+        (
+            "secret-explicit-41f7",
+            "secret-callasr-62bd",
+            "secret-provider-93ae",
+            "secret-explicit-41f7",
+        ),
+        (None, "secret-callasr-62bd", "secret-provider-93ae", "secret-callasr-62bd"),
+        (None, None, "secret-provider-93ae", "secret-provider-93ae"),
         (None, None, None, None),
     ],
 )
