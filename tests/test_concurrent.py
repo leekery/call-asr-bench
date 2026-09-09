@@ -44,8 +44,8 @@ def _write_manifest(tmp_path: Path, count: int) -> Path:
         audio.write_bytes(b"stub")
         language = "ru" if index % 2 == 0 else "en"
         lines.append(
-            '{"id":"item-%d","audio":"item-%d.wav","reference":"ref %d","language":"%s"}'
-            % (index, index, index, language)
+            f'{{"id":"item-{index}","audio":"item-{index}.wav",'
+            f'"reference":"ref {index}","language":"{language}"}}'
         )
     manifest = tmp_path / "dataset.jsonl"
     manifest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
@@ -96,20 +96,12 @@ def test_concurrent_result_models_are_immutable_and_exported() -> None:
     assert callable(run_concurrent_benchmark)
     assert ConcurrentBenchmarkResult.__dataclass_params__.frozen is True
 
-    try:
-        from callasr import (
-            ConcurrentBenchmarkError as PublicError,
-            ConcurrentBenchmarkResult as PublicResult,
-            ConcurrentItemResult as PublicItem,
-            run_concurrent_benchmark as public_run,
-        )
-    except ImportError as exc:
-        pytest.fail(f"public concurrent API is missing: {exc}")
+    import callasr
 
-    assert PublicError is ConcurrentBenchmarkError
-    assert PublicResult is ConcurrentBenchmarkResult
-    assert PublicItem is ConcurrentItemResult
-    assert public_run is run_concurrent_benchmark
+    assert callasr.ConcurrentBenchmarkError is ConcurrentBenchmarkError
+    assert callasr.ConcurrentBenchmarkResult is ConcurrentBenchmarkResult
+    assert callasr.ConcurrentItemResult is ConcurrentItemResult
+    assert callasr.run_concurrent_benchmark is run_concurrent_benchmark
 
 
 @pytest.mark.parametrize("concurrency", [0, -1, True, 1.5])
@@ -161,7 +153,7 @@ def test_concurrency_one_has_exact_timing_throughput_and_nearest_rank_percentile
     class Adapter:
         def transcribe(self, audio: AudioBuffer, language: str | None = None) -> Transcription:
             seen_languages.append(language)
-            index = int(round(float(audio.samples[0]) * 10))
+            index = round(float(audio.samples[0]) * 10)
             return Transcription(text=f"hyp-{index}")
 
     result = run_concurrent_benchmark(
@@ -242,7 +234,7 @@ def test_result_order_is_manifest_order_when_workers_finish_out_of_order(
 
     class Adapter:
         def transcribe(self, audio: AudioBuffer, language: str | None = None) -> Transcription:
-            index = int(round(float(audio.samples[0]) * 10))
+            index = round(float(audio.samples[0]) * 10)
             if index == 0:
                 first_started.set()
                 assert allow_first.wait(timeout=5)
@@ -320,7 +312,7 @@ def test_failure_with_concurrency_one_does_not_eagerly_submit_later_items(
 
     class Adapter:
         def transcribe(self, audio: AudioBuffer, language: str | None = None) -> Transcription:
-            index = int(round(float(audio.samples[0]) * 10))
+            index = round(float(audio.samples[0]) * 10)
             seen_indices.append(index)
             raise marker
 
