@@ -2,6 +2,42 @@
 
 All notable changes to `call-asr-bench` are documented here.
 
+## 0.4.0 - 2026-09-09
+
+### Added
+
+- path-independent, order-sensitive dataset fingerprints that include item metadata and exact source-WAV content hashes;
+- comparison-time dataset identity checks for fingerprinted artifacts, preventing silent comparison of different known datasets;
+- end-to-end front-end gain and symmetric hard-clipping configuration through `run_benchmark` and `callasr run`;
+- explicit `Gain dB` and `Clip` columns in `callasr compare`;
+- a separate Python-only `StreamingASRAdapter` protocol and immutable streaming update/result models;
+- deterministic exact-sample audio framing for streaming benchmarks;
+- streaming latency metrics for time to first non-empty partial, finalization after the last submitted frame, and total observed streaming wall time;
+- normalized token-level partial-transcript stability with deterministic duplicate-state collapsing and revision scoring;
+- strict streaming contract validation for incomplete frame consumption, invalid updates, finalization violations, and non-monotonic clocks.
+
+### Changed
+
+- current batch result artifacts use schema version 6;
+- schema-v5 artifacts add `dataset.fingerprint`, while schema v6 additionally records `channel.gain_db` and nullable `channel.clip_threshold`;
+- `callasr compare` accepts schemas 1 through 6 and exposes later configuration only when the source schema actually recorded it;
+- the fixed impairment order is now source WAV → optional gain/clipping → optional additive noise → G.711 → packet loss → jitter → ASR;
+- default gain/clipping configuration preserves the earlier audio call path and does not invoke the transform.
+
+### Compatibility
+
+- published `v0.2.0` artifacts remain schema version 1 and published `v0.3.0` artifacts remain schema version 4;
+- existing packet-loss, additive-noise, and jitter seed derivations are unchanged;
+- WER, CER, RTF, speed-factor, numeric-entity, and existing dataset semantics are unchanged by gain/clipping integration;
+- schemas 1 through 4 remain comparable without claiming dataset identity that those artifacts did not record;
+- schemas 1 through 5 render gain/clipping fields as unavailable rather than assuming zero.
+
+### Notes
+
+- the streaming foundation is intentionally Python-only in this release: there is no streaming CLI command, serialized streaming artifact schema, or provider-specific streaming adapter yet;
+- streaming tests use injected fake clocks and adapters; default CI adds no sleeps, network access, model downloads, or threads;
+- GigaAM Multilingual integration remains tracked separately in issue #22 and is not part of v0.4.0.
+
 ## 0.3.0 - 2026-09-08
 
 ### Added
