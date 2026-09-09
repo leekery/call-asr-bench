@@ -1,0 +1,26 @@
+name: Verify vLLM Realtime extra
+
+on:
+  push:
+    branches:
+      - feat/vllm-realtime-adapter
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.8"
+          python-version: "3.10"
+      - run: uv sync --locked --extra vllm-realtime --extra dev
+      - name: Verify sync WebSocket client
+        run: |
+          uv run python - <<'PY'
+          from websockets.sync.client import connect
+          import websockets
+          print(websockets.__version__)
+          assert callable(connect)
+          PY
+      - run: uv run pytest -q tests/test_vllm_realtime_adapter.py tests/test_vllm_realtime_live.py
