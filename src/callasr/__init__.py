@@ -1,5 +1,6 @@
 """Public API for call-asr-bench."""
 
+from callasr.adapters.vllm_realtime import VLLMRealtimeAdapter, VLLMRealtimeError
 from callasr.audio import (
     AudioBuffer,
     apply_additive_noise,
@@ -54,6 +55,8 @@ __all__ = [
     "StreamingBenchmarkResult",
     "StreamingError",
     "StreamingUpdate",
+    "VLLMRealtimeAdapter",
+    "VLLMRealtimeError",
     "apply_additive_noise",
     "apply_gain_and_clip",
     "apply_jitter_loss",
