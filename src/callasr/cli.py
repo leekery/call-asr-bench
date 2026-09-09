@@ -14,6 +14,7 @@ from pathlib import Path
 from callasr.adapters.base import AdapterError, ASRAdapter
 from callasr.adapters.faster_whisper import FasterWhisperAdapter
 from callasr.adapters.openai_compatible import OpenAICompatibleAdapter
+from callasr.adapters.vllm_realtime import VLLMRealtimeAdapter
 from callasr.benchmark import BenchmarkResult, result_to_dict, run_benchmark
 from callasr.concurrent import ConcurrentBenchmarkError, run_concurrent_benchmark
 from callasr.concurrent_artifact import (
@@ -25,6 +26,14 @@ from callasr.concurrent_artifact import (
 from callasr.dataset import DatasetError, dataset_fingerprint, load_dataset_manifest
 from callasr.io import AudioError
 from callasr.report import ComparisonError, compare_result_artifacts
+from callasr.streaming import StreamingError
+from callasr.streaming_artifact import (
+    StreamingAdapterInfo,
+    StreamingArtifact,
+    build_streaming_artifact,
+    streaming_artifact_to_dict,
+)
+from callasr.streaming_dataset import StreamingDatasetError, run_streaming_dataset_benchmark
 
 
 class ConfigurationError(ValueError):
@@ -117,6 +126,21 @@ def build_parser() -> argparse.ArgumentParser:
     concurrent.add_argument("--concurrency", type=_positive_int, required=True)
     concurrent.add_argument("--output", required=True)
 
+    streaming = subparsers.add_parser("streaming", help="run a streaming ASR benchmark")
+    streaming.add_argument("manifest")
+    streaming.add_argument("--adapter", choices=("vllm-realtime",), required=True)
+    streaming.add_argument("--model", required=True)
+    streaming.add_argument("--base-url", required=True)
+    streaming.add_argument("--api-key")
+    streaming.add_argument("--timeout-seconds", type=_positive_float, default=60.0)
+    streaming.add_argument("--frame-duration-ms", type=_positive_int, default=20)
+    streaming.add_argument(
+        "--language-mode",
+        choices=("manifest", "autodetect"),
+        default="manifest",
+    )
+    streaming.add_argument("--output", required=True)
+
     compare = subparsers.add_parser("compare", help="compare saved benchmark artifacts")
     compare.add_argument("results", nargs="+")
     return parser
@@ -150,6 +174,12 @@ def _resolved_api_key(args: argparse.Namespace) -> str | None:
     if api_key is None:
         api_key = os.environ.get("OPENAI_API_KEY")
     return api_key
+
+
+def _resolved_vllm_api_key(args: argparse.Namespace) -> str | None:
+    if args.api_key is not None:
+        return args.api_key
+    return os.environ.get("CALLASR_VLLM_REALTIME_API_KEY")
 
 
 def _build_adapter(args: argparse.Namespace) -> ASRAdapter:
@@ -256,6 +286,12 @@ def write_concurrent_artifact(result: ConcurrentArtifact, path: str | Path) -> N
     _write_json_artifact(concurrent_artifact_to_dict(result), path)
 
 
+def write_streaming_artifact(result: StreamingArtifact, path: str | Path) -> None:
+    """Write a complete streaming result with same-directory atomic replacement."""
+
+    _write_json_artifact(streaming_artifact_to_dict(result), path)
+
+
 def _run(args: argparse.Namespace) -> int:
     _validate_configuration(args)
     adapter = _build_adapter(args)
@@ -298,6 +334,39 @@ def _concurrent(args: argparse.Namespace) -> int:
     return 0
 
 
+def _streaming(args: argparse.Namespace) -> int:
+    manifest_path = Path(args.manifest).expanduser().resolve()
+    items = load_dataset_manifest(manifest_path)
+    if args.language_mode == "manifest" and any(item.language is not None for item in items):
+        raise ConfigurationError(
+            "vLLM Realtime does not support explicit manifest language tags; "
+            "use --language-mode autodetect to explicitly ignore them"
+        )
+
+    adapter = VLLMRealtimeAdapter(
+        args.model,
+        base_url=args.base_url,
+        api_key=_resolved_vllm_api_key(args),
+        timeout_seconds=args.timeout_seconds,
+    )
+    adapter_info = StreamingAdapterInfo(
+        name=adapter.name,
+        model=adapter.model,
+        device=adapter.device,
+        compute_type=adapter.compute_type,
+        options=dict(adapter.decoding_options),
+    )
+    result = run_streaming_dataset_benchmark(
+        manifest_path,
+        adapter,
+        frame_duration_ms=args.frame_duration_ms,
+        language_mode=args.language_mode,
+    )
+    artifact = build_streaming_artifact(result, adapter=adapter_info)
+    write_streaming_artifact(artifact, args.output)
+    return 0
+
+
 def _compare(args: argparse.Namespace) -> int:
     print(compare_result_artifacts(args.results))
     return 0
@@ -312,12 +381,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run(args)
         if args.command == "concurrent":
             return _concurrent(args)
+        if args.command == "streaming":
+            return _streaming(args)
         if args.command == "compare":
             return _compare(args)
     except (
         DatasetError,
         AudioError,
         AdapterError,
+        StreamingError,
+        StreamingDatasetError,
         ConcurrentBenchmarkError,
         ConfigurationError,
         ArtifactError,
