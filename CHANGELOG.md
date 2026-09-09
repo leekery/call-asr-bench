@@ -2,6 +2,43 @@
 
 All notable changes to `call-asr-bench` are documented here.
 
+## 0.5.0 - 2026-09-09
+
+### Added
+
+- a Python-only concurrent benchmark foundation for synchronous ASR adapters with bounded worker scheduling;
+- lazy worker-local adapter factories so one adapter instance is never shared across concurrent worker threads;
+- deterministic manifest-order concurrent results even when requests complete out of order;
+- per-item adapter latency, aggregate wall time, throughput speed factor, and explicit nearest-rank p50/p95/max latency metrics;
+- `callasr concurrent` for clean-source-WAV load tests using faster-whisper or OpenAI-compatible adapters;
+- a separate `kind=concurrent`, schema-version-1 load-test artifact family with dataset fingerprints, non-secret adapter metadata, load configuration, aggregate metrics, and ordered item results;
+- `VLLMRealtimeAdapter` for vLLM's self-hosted WebSocket `/v1/realtime` transcription protocol;
+- deterministic 16 kHz PCM16/base64 vLLM Realtime transport with cumulative partial transcripts and authoritative final transcript handling;
+- optional `vllm-realtime` transport dependencies and an opt-in live vLLM smoke test.
+
+### Changed
+
+- `callasr compare` explicitly rejects concurrent load-test artifacts instead of mixing load latency/throughput with batch WER/CER semantics;
+- concurrent benchmark failures stop new submissions, cancel pending work where possible, drain already-running work, and re-raise the original factory/adapter error rather than returning partial-success summaries;
+- the streaming foundation is now validated against a real self-hosted protocol while remaining separate from batch `callasr run` and batch artifact schema v6.
+
+### Compatibility
+
+- batch artifacts remain schema version 6; v0.5.0 does not introduce batch schema v7;
+- concurrent artifacts use their own `kind=concurrent`, schema version 1 contract;
+- published `v0.2.0`, `v0.3.0`, and `v0.4.0` artifacts remain immutable;
+- existing WER/CER/RTF/entity metrics and impairment seed streams are unchanged;
+- API keys for HTTP and WebSocket integrations are not serialized into artifacts or reproducibility metadata;
+- the vLLM Realtime optional dependency is constrained to `websockets>=14,<17` so the package continues to support Python 3.10.
+
+### Notes
+
+- the first concurrent CLI intentionally benchmarks clean source WAVs only; impairment composition for load tests remains future work;
+- the vLLM Realtime adapter requires mono 16 kHz input and rejects explicit language selection because the current upstream realtime session contract does not expose a language field;
+- the first vLLM integration follows the documented file-style sequence and submits all audio before consuming transcript events, so time-to-first-partial is not a paced full-duplex microphone TTFT metric; finalization latency remains available;
+- streaming CLI/serialization and paced full-duplex timing remain future work;
+- GigaAM Multilingual integration remains tracked separately in issue #22 and is not part of v0.5.0.
+
 ## 0.4.0 - 2026-09-09
 
 ### Added
