@@ -309,6 +309,7 @@ def test_final_observed_before_simulated_audio_end_is_rejected() -> None:
 
 def test_non_monotonic_clock_is_rejected() -> None:
     clock = FakeClock(1.0)
+    sleeper = FakeSleeper(clock)
 
     class Adapter:
         name = "fake-paced"
@@ -325,6 +326,6 @@ def test_non_monotonic_clock_is_rejected() -> None:
     with pytest.raises(StreamingError, match="monotonic"):
         asyncio.run(
             run_paced_streaming_benchmark(
-                _audio(2), Adapter(), frame_duration_ms=2, clock=clock, sleeper=asyncio.sleep
+                _audio(2), Adapter(), frame_duration_ms=2, clock=clock, sleeper=sleeper
             )
         )
