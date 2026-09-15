@@ -4,6 +4,7 @@ from callasr.adapters.base import AdapterError, ASRAdapter, Transcription
 from callasr.adapters.faster_whisper import FasterWhisperAdapter
 from callasr.adapters.openai_compatible import OpenAICompatibleAdapter
 from callasr.adapters.vllm_realtime import VLLMRealtimeAdapter, VLLMRealtimeError
+from callasr.adapters.vllm_realtime_paced import VLLMPacedRealtimeAdapter
 
 __all__ = [
     "ASRAdapter",
@@ -11,6 +12,7 @@ __all__ = [
     "FasterWhisperAdapter",
     "OpenAICompatibleAdapter",
     "Transcription",
+    "VLLMPacedRealtimeAdapter",
     "VLLMRealtimeAdapter",
     "VLLMRealtimeError",
 ]
