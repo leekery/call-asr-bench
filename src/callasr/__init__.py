@@ -1,6 +1,7 @@
 """Public API for call-asr-bench."""
 
 from callasr.adapters.vllm_realtime import VLLMRealtimeAdapter, VLLMRealtimeError
+from callasr.adapters.vllm_realtime_paced import VLLMPacedRealtimeAdapter
 from callasr.audio import (
     AudioBuffer,
     apply_additive_noise,
@@ -31,6 +32,12 @@ from callasr.metrics.wer import (
     word_error_counts,
     word_error_rate,
 )
+from callasr.paced_streaming import (
+    PacedStreamingASRAdapter,
+    PacedStreamingBenchmarkResult,
+    run_paced_streaming_benchmark,
+    validate_realtime_factor,
+)
 from callasr.streaming import (
     ObservedStreamingUpdate,
     StreamingASRAdapter,
@@ -58,6 +65,8 @@ __all__ = [
     "NumericEntity",
     "NumericEntityScore",
     "ObservedStreamingUpdate",
+    "PacedStreamingASRAdapter",
+    "PacedStreamingBenchmarkResult",
     "StreamingASRAdapter",
     "StreamingBenchmarkResult",
     "StreamingDatasetError",
@@ -66,6 +75,7 @@ __all__ = [
     "StreamingDatasetSummary",
     "StreamingError",
     "StreamingUpdate",
+    "VLLMPacedRealtimeAdapter",
     "VLLMRealtimeAdapter",
     "VLLMRealtimeError",
     "apply_additive_noise",
@@ -83,10 +93,12 @@ __all__ = [
     "partial_stability_score",
     "resample",
     "run_concurrent_benchmark",
+    "run_paced_streaming_benchmark",
     "run_streaming_benchmark",
     "run_streaming_dataset_benchmark",
     "score_numeric_entities",
     "telephone_channel",
+    "validate_realtime_factor",
     "word_error_counts",
     "word_error_rate",
 ]
