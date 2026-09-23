@@ -739,8 +739,8 @@ This first real adapter intentionally follows vLLM's file-style sequence: all
 audio frames are submitted before transcription events are consumed. Its
 **finalization latency** remains useful, but its time-to-first-partial includes the
 full audio upload and must not be interpreted as paced, full-duplex microphone
-TTFT. A future full-duplex adapter contract should make that timing boundary
-explicit rather than changing this result silently.
+TTFT. Paced WAV benchmarks use a separate schema-2 result and do not change this
+file-upload timing boundary.
 
 For an opt-in live smoke test against a running vLLM server, provide a real mono
 16 kHz PCM WAV and run with the transport extra installed:
@@ -799,7 +799,7 @@ The current runner does not provide:
 - provider-specific remote features beyond the common transcription contract;
 - a full RTP/adaptive jitter-buffer, packet reordering, duplication, or
   correlated network-delay simulation;
-- paced full-duplex microphone timing;
+- live microphone capture; paced mode currently streams manifest WAV items;
 - impairment pipelines inside concurrent load runs;
 - GigaAM integration;
 - automatic dataset downloading;
@@ -822,13 +822,12 @@ behavior is covered with an injected fake client.
 
 ## Roadmap
 
-1. Define and validate a distinct paced/full-duplex streaming timing contract.
-2. More local ASR adapters, including GigaAM Multilingual when its packaging path
+1. More local ASR adapters, including GigaAM Multilingual when its packaging path
    is stable.
-3. Add impairment composition to concurrent load runs only after the clean-load
+2. Add impairment composition to concurrent load runs only after the clean-load
    artifact contract has practical usage.
-4. Add additional critical-entity slices such as names and addresses.
-5. Add reporting/leaderboard layers only when datasets and artifact identities
+3. Add additional critical-entity slices such as names and addresses.
+4. Add reporting/leaderboard layers only when datasets and artifact identities
    are comparable by construction.
 
 ## License
