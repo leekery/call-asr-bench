@@ -71,17 +71,28 @@ async def _send(connection: _AsyncRealtimeConnection, payload: dict[str, object]
 
 async def _recv(
     connection: _AsyncRealtimeConnection,
-    timeout_seconds: float,
+    timeout_seconds: float | None,
 ) -> dict[str, object]:
     try:
-        raw = await asyncio.wait_for(connection.recv(), timeout=timeout_seconds)
+        if timeout_seconds is None:
+            raw = await connection.recv()
+        else:
+            raw = await asyncio.wait_for(connection.recv(), timeout=timeout_seconds)
     except (StopAsyncIteration, EOFError) as exc:
         raise VLLMRealtimeError(
             "vLLM Realtime connection closed before transcription.done"
         ) from exc
+    except asyncio.TimeoutError as exc:
+        raise VLLMRealtimeError("vLLM Realtime timed out while waiting for a server event") from exc
     except Exception as exc:
         raise VLLMRealtimeError("vLLM Realtime connection failed while receiving events") from exc
     return _decode_event(raw)
+
+
+async def _timeout_after(timeout_seconds: float) -> None:
+    """Wait for a response timeout after the paced sender has completed."""
+
+    await asyncio.sleep(timeout_seconds)
 
 
 async def _cancel_and_drain(task: asyncio.Task[None] | None) -> None:
@@ -97,7 +108,8 @@ async def _recv_while_sender_runs(
     timeout_seconds: float,
     sender_task: asyncio.Task[None],
 ) -> dict[str, object]:
-    receive_task = asyncio.create_task(_recv(connection, timeout_seconds))
+    receive_task = asyncio.create_task(_recv(connection, None))
+    timeout_task: asyncio.Task[None] | None = None
     try:
         done, _ = await asyncio.wait(
             {receive_task, sender_task},
@@ -111,11 +123,30 @@ async def _recv_while_sender_runs(
                     receive_task.cancel()
                 await asyncio.gather(receive_task, return_exceptions=True)
                 raise
-        return await receive_task
+
+        if receive_task.done():
+            return await receive_task
+
+        # The sender has now exhausted the paced input and sent final commit.
+        # Start the response timeout here, rather than at the beginning of a
+        # potentially long audio submission.
+        timeout_task = asyncio.create_task(_timeout_after(timeout_seconds))
+        done, _ = await asyncio.wait(
+            {receive_task, timeout_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if receive_task in done:
+            await _cancel_and_drain(timeout_task)
+            return await receive_task
+        raise VLLMRealtimeError("vLLM Realtime timed out waiting for a server event")
     except BaseException:
         if not receive_task.done():
             receive_task.cancel()
+        if timeout_task is not None and not timeout_task.done():
+            timeout_task.cancel()
         await asyncio.gather(receive_task, return_exceptions=True)
+        if timeout_task is not None:
+            await asyncio.gather(timeout_task, return_exceptions=True)
         raise
 
 
