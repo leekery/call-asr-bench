@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 
 from callasr.adapters.base import AdapterOption
 from callasr.streaming_dataset import (
+    PacedStreamingDatasetItemResult,
+    PacedStreamingDatasetResult,
+    PacedStreamingDatasetSummary,
     StreamingDatasetItemResult,
     StreamingDatasetResult,
     StreamingDatasetSummary,
@@ -46,6 +49,22 @@ class StreamingArtifact:
     kind: str = field(default="streaming", init=False)
     schema_version: int = field(default=1, init=False)
     timing_mode: str = field(default="file_upload", init=False)
+
+
+@dataclass(frozen=True, slots=True)
+class StreamingArtifactV2:
+    """Schema-v2 streaming artifact supporting file-upload and paced timing."""
+
+    created_at: str
+    dataset: StreamingDatasetInfo
+    adapter: StreamingAdapterInfo
+    result: StreamingDatasetResult | PacedStreamingDatasetResult
+    kind: str = field(default="streaming", init=False)
+    schema_version: int = field(default=2, init=False)
+
+    @property
+    def timing_mode(self) -> str:
+        return self.result.timing_mode
 
 
 def _created_at() -> str:
@@ -142,4 +161,183 @@ def streaming_artifact_to_dict(artifact: StreamingArtifact) -> dict[str, object]
             }
             for item in artifact.items
         ],
+    }
+
+
+def build_streaming_artifact_v2(
+    result: StreamingDatasetResult | PacedStreamingDatasetResult,
+    *,
+    adapter: StreamingAdapterInfo,
+    created_at: str | None = None,
+) -> StreamingArtifactV2:
+    """Build a schema-v2 artifact without reinterpreting schema-v1 metrics."""
+
+    if not isinstance(result, (StreamingDatasetResult, PacedStreamingDatasetResult)):
+        raise TypeError("result must be a file-upload or paced streaming dataset result")
+    return StreamingArtifactV2(
+        created_at=_created_at() if created_at is None else created_at,
+        dataset=StreamingDatasetInfo(
+            path=result.dataset_path,
+            item_count=result.summary.item_count,
+            fingerprint=result.dataset_fingerprint,
+        ),
+        adapter=adapter,
+        result=result,
+    )
+
+
+def _streaming_v2_file_upload_summary(summary: StreamingDatasetSummary) -> dict[str, object]:
+    return {
+        "item_count": summary.item_count,
+        "completed_items": summary.completed_items,
+        "failed_items": summary.failed_items,
+        "total_audio_seconds": summary.total_audio_seconds,
+        "time_to_first_partial_count": summary.time_to_first_partial_count,
+        "time_to_first_partial_p50_seconds": summary.time_to_first_partial_p50_seconds,
+        "time_to_first_partial_p95_seconds": summary.time_to_first_partial_p95_seconds,
+        "finalization_latency_p50_seconds": summary.finalization_latency_p50_seconds,
+        "finalization_latency_p95_seconds": summary.finalization_latency_p95_seconds,
+        "finalization_latency_max_seconds": summary.finalization_latency_max_seconds,
+        "streaming_wall_p50_seconds": summary.streaming_wall_p50_seconds,
+        "streaming_wall_p95_seconds": summary.streaming_wall_p95_seconds,
+        "streaming_wall_max_seconds": summary.streaming_wall_max_seconds,
+        "partial_stability_count": summary.partial_stability_count,
+        "partial_stability_mean": summary.partial_stability_mean,
+    }
+
+
+def _streaming_v2_file_upload_items(
+    items: tuple[StreamingDatasetItemResult, ...],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "id": item.id,
+            "audio": item.audio,
+            "audio_seconds": item.audio_seconds,
+            "frame_count": item.frame_count,
+            "final_text": item.final_text,
+            "partial_update_count": item.partial_update_count,
+            "time_to_first_partial_seconds": item.time_to_first_partial_seconds,
+            "finalization_latency_seconds": item.finalization_latency_seconds,
+            "total_streaming_wall_seconds": item.total_streaming_wall_seconds,
+            "partial_stability": item.partial_stability,
+            "updates": [
+                {
+                    "text": update.text,
+                    "is_final": update.is_final,
+                    "observed_seconds": update.observed_seconds,
+                }
+                for update in item.updates
+            ],
+        }
+        for item in items
+    ]
+
+
+def _paced_summary(summary: PacedStreamingDatasetSummary) -> dict[str, object]:
+    return {
+        "item_count": summary.item_count,
+        "completed_items": summary.completed_items,
+        "failed_items": summary.failed_items,
+        "total_audio_seconds": summary.total_audio_seconds,
+        "time_to_first_partial_count": summary.time_to_first_partial_count,
+        "time_to_first_partial_p50_seconds": summary.time_to_first_partial_p50_seconds,
+        "time_to_first_partial_p95_seconds": summary.time_to_first_partial_p95_seconds,
+        "audio_submitted_at_first_partial_count": summary.audio_submitted_at_first_partial_count,
+        "audio_submitted_at_first_partial_p50_seconds": (
+            summary.audio_submitted_at_first_partial_p50_seconds
+        ),
+        "audio_submitted_at_first_partial_p95_seconds": (
+            summary.audio_submitted_at_first_partial_p95_seconds
+        ),
+        "session_setup_p50_seconds": summary.session_setup_p50_seconds,
+        "session_setup_p95_seconds": summary.session_setup_p95_seconds,
+        "session_setup_max_seconds": summary.session_setup_max_seconds,
+        "audio_submission_wall_p50_seconds": summary.audio_submission_wall_p50_seconds,
+        "audio_submission_wall_p95_seconds": summary.audio_submission_wall_p95_seconds,
+        "audio_submission_wall_max_seconds": summary.audio_submission_wall_max_seconds,
+        "finalization_latency_p50_seconds": summary.finalization_latency_p50_seconds,
+        "finalization_latency_p95_seconds": summary.finalization_latency_p95_seconds,
+        "finalization_latency_max_seconds": summary.finalization_latency_max_seconds,
+        "total_session_wall_p50_seconds": summary.total_session_wall_p50_seconds,
+        "total_session_wall_p95_seconds": summary.total_session_wall_p95_seconds,
+        "total_session_wall_max_seconds": summary.total_session_wall_max_seconds,
+        "partial_stability_count": summary.partial_stability_count,
+        "partial_stability_mean": summary.partial_stability_mean,
+    }
+
+
+def _paced_items(items: tuple[PacedStreamingDatasetItemResult, ...]) -> list[dict[str, object]]:
+    return [
+        {
+            "id": item.id,
+            "audio": item.audio,
+            "audio_seconds": item.audio_seconds,
+            "frame_count": item.frame_count,
+            "final_text": item.final_text,
+            "partial_update_count": item.partial_update_count,
+            "session_setup_seconds": item.session_setup_seconds,
+            "time_to_first_partial_seconds": item.time_to_first_partial_seconds,
+            "audio_submitted_seconds_at_first_partial": (
+                item.audio_submitted_seconds_at_first_partial
+            ),
+            "audio_submission_wall_seconds": item.audio_submission_wall_seconds,
+            "finalization_latency_seconds": item.finalization_latency_seconds,
+            "total_session_wall_seconds": item.total_session_wall_seconds,
+            "partial_stability": item.partial_stability,
+            "updates": [
+                {
+                    "text": update.text,
+                    "is_final": update.is_final,
+                    "observed_seconds": update.observed_seconds,
+                }
+                for update in item.updates
+            ],
+        }
+        for item in items
+    ]
+
+
+def streaming_artifact_v2_to_dict(artifact: StreamingArtifactV2) -> dict[str, object]:
+    """Serialize an exact schema-v2 shape for either streaming timing mode."""
+
+    result = artifact.result
+    if isinstance(result, StreamingDatasetResult):
+        streaming = {
+            "frame_duration_ms": result.frame_duration_ms,
+            "language_mode": result.language_mode,
+        }
+        summary = _streaming_v2_file_upload_summary(result.summary)
+        items = _streaming_v2_file_upload_items(result.items)
+    elif isinstance(result, PacedStreamingDatasetResult):
+        streaming = {
+            "frame_duration_ms": result.frame_duration_ms,
+            "realtime_factor": result.realtime_factor,
+            "language_mode": result.language_mode,
+        }
+        summary = _paced_summary(result.summary)
+        items = _paced_items(result.items)
+    else:
+        raise TypeError("schema-v2 artifact result has an unsupported timing mode")
+
+    return {
+        "kind": artifact.kind,
+        "schema_version": artifact.schema_version,
+        "timing_mode": artifact.timing_mode,
+        "created_at": artifact.created_at,
+        "dataset": {
+            "path": artifact.dataset.path,
+            "item_count": artifact.dataset.item_count,
+            "fingerprint": artifact.dataset.fingerprint,
+        },
+        "adapter": {
+            "name": artifact.adapter.name,
+            "model": artifact.adapter.model,
+            "device": artifact.adapter.device,
+            "compute_type": artifact.adapter.compute_type,
+            "options": dict(artifact.adapter.options),
+        },
+        "streaming": streaming,
+        "summary": summary,
+        "items": items,
     }
