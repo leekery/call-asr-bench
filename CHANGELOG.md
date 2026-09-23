@@ -2,6 +2,34 @@
 
 All notable changes to `call-asr-bench` are documented here.
 
+## 0.6.0 - 2026-09-23
+
+### Added
+
+- `callasr streaming` for manifest-wide vLLM Realtime transcription with an explicit `file_upload` or `paced` timing mode;
+- a paced, full-duplex vLLM Realtime adapter and sequential dataset runner with configurable realtime factor and separate session, audio-submission, TTFT, and finalization metrics;
+- streaming schema version 2 for paced results, including realtime factor and submitted-audio progress at the first partial;
+- an opt-in live CLI smoke test for the paced vLLM workflow.
+
+### Changed
+
+- paced receive timeouts now begin after the final audio frame and commit are sent, so a long valid audio submission does not consume the server-response timeout;
+- vLLM Realtime manifest language tags still require an explicit `--language-mode autodetect` choice because the protocol has no language setting.
+
+### Compatibility
+
+- file-upload mode remains the CLI default and continues to write its schema-version-1 artifact with the existing timing semantics;
+- paced mode writes schema version 2 and reports its distinct timing boundary; existing schema-1 artifacts remain valid;
+- batch artifact schema version 6 and concurrent artifact schema version 1 are unchanged;
+- API keys are not written to benchmark artifacts.
+
+### Notes
+
+- install the optional WebSocket transport with `uv sync --extra vllm-realtime`;
+- the vLLM Realtime adapter requires mono 16 kHz PCM WAV input and does not accept explicit language settings;
+- paced realtime factor defaults to `1.0`, which submits audio in real time;
+- GigaAM Multilingual remains deferred in issue #22 while its upstream packaging path is unstable.
+
 ## 0.5.0 - 2026-09-09
 
 ### Added
