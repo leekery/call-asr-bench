@@ -574,10 +574,9 @@ If no non-empty partial is observed, time-to-first-partial and stability are
 `None` where applicable rather than inventing a perfect score.
 
 The streaming foundation remains separate from the batch CLI/artifact contract.
-A real vLLM Realtime adapter validates the single-audio protocol, and current
-`main` provides a generic dataset-level streaming runner, a separate versioned
-streaming artifact, and a `callasr streaming` CLI for the existing file-upload
-vLLM timing mode.
+The vLLM Realtime workflow provides a generic dataset-level streaming runner,
+versioned streaming artifacts, and a `callasr streaming` CLI with distinct
+file-upload and paced/full-duplex timing modes.
 
 ### Streaming datasets and artifacts
 
@@ -607,8 +606,9 @@ timing_mode: file_upload
 
 `timing_mode` is part of the public contract. Schema 1 means the existing
 file-upload timing semantics: the adapter may submit the complete audio stream
-before transcript events are observed. A future paced/full-duplex benchmark must
-use a distinct timing mode rather than silently changing what TTFT means.
+before transcript events are observed. The paced/full-duplex workflow uses
+schema 2 and records its separate audio-submission and session timing boundaries;
+neither mode changes the meaning of the other.
 
 Each streaming item stores final text, frame count, partial count, nullable TTFT,
 finalization latency, total observed streaming wall time, nullable partial
@@ -666,7 +666,39 @@ replace leaves an existing completed output untouched.
 The resulting TTFT is still **file-upload TTFT**, not paced microphone TTFT. The
 current vLLM adapter submits all supplied frames before consuming transcript
 events. `timing_mode=file_upload` remains mandatory in schema 1 precisely so a
-future full-duplex mode cannot silently redefine those numbers.
+full-duplex mode cannot silently redefine those numbers.
+
+### Run a paced/full-duplex vLLM streaming benchmark
+
+Select paced timing explicitly to send frames at the requested realtime factor
+while transcript events are received concurrently:
+
+```bash
+CALLASR_VLLM_REALTIME_API_KEY=your-secret-key \
+uv run --extra vllm-realtime callasr streaming dataset/dataset.jsonl \
+  --adapter vllm-realtime \
+  --model mistralai/Voxtral-Mini-4B-Realtime-2602 \
+  --base-url http://localhost:8000/v1 \
+  --timing-mode paced \
+  --frame-duration-ms 20 \
+  --realtime-factor 1.0 \
+  --language-mode autodetect \
+  --output runs/voxtral-paced-streaming.json
+```
+
+`--realtime-factor` defaults to `1.0` in paced mode and is rejected in
+file-upload mode. A factor of `1.0` submits audio in real time; higher values
+submit it faster. Paced runs write streaming schema 2 with
+`timing_mode=paced`, the chosen factor, session setup, audio submission, TTFT,
+finalization, total session wall time, and the submitted-audio progress at the
+first partial. Schema-1 file-upload output remains the default and keeps its
+existing fields.
+
+The same language rule applies: if any manifest item has a language tag, pass
+`--language-mode autodetect` because the current vLLM Realtime protocol does not
+accept an explicit language setting. This is checked before an adapter or
+WebSocket connection is created. API keys are never written to either schema,
+and a failed paced run leaves any existing output artifact intact.
 
 ### vLLM Realtime adapter
 
@@ -721,8 +753,10 @@ uv run --extra vllm-realtime pytest -q tests/test_vllm_realtime_live.py
 ```
 
 Set `CALLASR_VLLM_REALTIME_API_KEY` as well when the server requires Bearer
-authentication. The live test is skipped by default, so normal CI performs no
-network access and downloads no model.
+authentication. Set `CALLASR_VLLM_REALTIME_PACED=1` to also run the paced
+adapter and paced CLI smoke tests; both use the same URL, model, WAV, and
+optional API key. All live tests are skipped by default, so normal CI performs
+no network access and downloads no model.
 
 ## Concurrent benchmark foundation
 
