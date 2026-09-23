@@ -49,10 +49,14 @@ from callasr.streaming import (
     run_streaming_benchmark,
 )
 from callasr.streaming_dataset import (
+    PacedStreamingDatasetItemResult,
+    PacedStreamingDatasetResult,
+    PacedStreamingDatasetSummary,
     StreamingDatasetError,
     StreamingDatasetItemResult,
     StreamingDatasetResult,
     StreamingDatasetSummary,
+    run_paced_streaming_dataset_benchmark,
     run_streaming_dataset_benchmark,
 )
 
@@ -67,6 +71,9 @@ __all__ = [
     "ObservedStreamingUpdate",
     "PacedStreamingASRAdapter",
     "PacedStreamingBenchmarkResult",
+    "PacedStreamingDatasetItemResult",
+    "PacedStreamingDatasetResult",
+    "PacedStreamingDatasetSummary",
     "StreamingASRAdapter",
     "StreamingBenchmarkResult",
     "StreamingDatasetError",
@@ -94,6 +101,7 @@ __all__ = [
     "resample",
     "run_concurrent_benchmark",
     "run_paced_streaming_benchmark",
+    "run_paced_streaming_dataset_benchmark",
     "run_streaming_benchmark",
     "run_streaming_dataset_benchmark",
     "score_numeric_entities",
