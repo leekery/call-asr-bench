@@ -172,6 +172,133 @@ def test_send_and_receive_are_interleaved_and_deltas_are_cumulative() -> None:
     assert connection.exited is True
 
 
+def test_long_paced_upload_does_not_consume_response_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _api()
+
+    class DeferredResponseConnection:
+        def __init__(self) -> None:
+            self.recv_calls = 0
+            self.sent: list[dict[str, object]] = []
+            self.final_commit = asyncio.Event()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def send(self, message: str) -> None:
+            payload = json.loads(message)
+            self.sent.append(payload)
+            if payload == {"type": "input_audio_buffer.commit", "final": True}:
+                self.final_commit.set()
+
+        async def recv(self) -> object:
+            self.recv_calls += 1
+            if self.recv_calls == 1:
+                return _event("session.created")
+            await self.final_commit.wait()
+            return _event("transcription.done", text="complete")
+
+    async def scenario() -> None:
+        connection = DeferredResponseConnection()
+        adapter = module.VLLMPacedRealtimeAdapter(
+            "model",
+            base_url="http://localhost:8000/v1",
+            timeout_seconds=0.5,
+            connect_factory=FakeConnectFactory(connection),
+        )
+        state = {"sender_active": False, "submitted_audio_seconds": 0.0}
+        original_recv = module._recv
+        recv_calls = 0
+
+        async def reject_timed_recv_while_sending(connection, timeout_seconds):
+            nonlocal recv_calls
+            recv_calls += 1
+            if recv_calls > 1 and timeout_seconds is not None and state["sender_active"]:
+                raise module.VLLMRealtimeError("simulated timeout during paced upload")
+            return await original_recv(connection, timeout_seconds)
+
+        monkeypatch.setattr(module, "_recv", reject_timed_recv_while_sending)
+
+        async def frames():
+            state["sender_active"] = True
+            try:
+                for _ in range(3):
+                    frame = _frame([0.0] * 16_000)
+                    state["submitted_audio_seconds"] += frame.samples.size / frame.sample_rate
+                    yield frame
+                    await asyncio.sleep(0)
+            finally:
+                state["sender_active"] = False
+
+        updates = [item async for item in adapter.stream_duplex(frames())]
+
+        assert state["submitted_audio_seconds"] == pytest.approx(3.0)
+        assert state["submitted_audio_seconds"] > adapter.timeout_seconds
+        assert [(item.text, item.is_final) for item in updates] == [("complete", True)]
+
+    asyncio.run(scenario())
+
+
+def test_response_timeout_starts_after_final_commit_and_cancels_receive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _api()
+
+    class SilentAfterCommitConnection:
+        def __init__(self) -> None:
+            self.recv_calls = 0
+            self.final_commit = asyncio.Event()
+            self.receive_cancelled = asyncio.Event()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def send(self, message: str) -> None:
+            if json.loads(message) == {"type": "input_audio_buffer.commit", "final": True}:
+                self.final_commit.set()
+
+        async def recv(self) -> object:
+            self.recv_calls += 1
+            if self.recv_calls == 1:
+                return _event("session.created")
+            await self.final_commit.wait()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                self.receive_cancelled.set()
+                raise
+
+    async def scenario() -> None:
+        connection = SilentAfterCommitConnection()
+        adapter = module.VLLMPacedRealtimeAdapter(
+            "model",
+            base_url="http://localhost:8000/v1",
+            timeout_seconds=60.0,
+            connect_factory=FakeConnectFactory(connection),
+        )
+
+        async def immediate_timeout(_timeout_seconds: float) -> None:
+            await asyncio.sleep(0)
+
+        monkeypatch.setattr(module, "_timeout_after", immediate_timeout)
+
+        async def frames():
+            yield _frame([0.0])
+
+        with pytest.raises(module.VLLMRealtimeError, match="timed out waiting"):
+            _ = [item async for item in adapter.stream_duplex(frames())]
+        assert connection.receive_cancelled.is_set()
+
+    asyncio.run(scenario())
+
+
 def test_done_is_not_exposed_until_sender_finishes() -> None:
     module = _api()
 
