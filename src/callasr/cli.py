@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -15,6 +16,7 @@ from callasr.adapters.base import AdapterError, ASRAdapter
 from callasr.adapters.faster_whisper import FasterWhisperAdapter
 from callasr.adapters.openai_compatible import OpenAICompatibleAdapter
 from callasr.adapters.vllm_realtime import VLLMRealtimeAdapter
+from callasr.adapters.vllm_realtime_paced import VLLMPacedRealtimeAdapter
 from callasr.benchmark import BenchmarkResult, result_to_dict, run_benchmark
 from callasr.concurrent import ConcurrentBenchmarkError, run_concurrent_benchmark
 from callasr.concurrent_artifact import (
@@ -30,10 +32,17 @@ from callasr.streaming import StreamingError
 from callasr.streaming_artifact import (
     StreamingAdapterInfo,
     StreamingArtifact,
+    StreamingArtifactV2,
     build_streaming_artifact,
+    build_streaming_artifact_v2,
     streaming_artifact_to_dict,
+    streaming_artifact_v2_to_dict,
 )
-from callasr.streaming_dataset import StreamingDatasetError, run_streaming_dataset_benchmark
+from callasr.streaming_dataset import (
+    StreamingDatasetError,
+    run_paced_streaming_dataset_benchmark,
+    run_streaming_dataset_benchmark,
+)
 
 
 class ConfigurationError(ValueError):
@@ -126,7 +135,10 @@ def build_parser() -> argparse.ArgumentParser:
     concurrent.add_argument("--concurrency", type=_positive_int, required=True)
     concurrent.add_argument("--output", required=True)
 
-    streaming = subparsers.add_parser("streaming", help="run a streaming ASR benchmark")
+    streaming = subparsers.add_parser(
+        "streaming",
+        help="run a file-upload or paced streaming ASR benchmark",
+    )
     streaming.add_argument("manifest")
     streaming.add_argument("--adapter", choices=("vllm-realtime",), required=True)
     streaming.add_argument("--model", required=True)
@@ -134,6 +146,17 @@ def build_parser() -> argparse.ArgumentParser:
     streaming.add_argument("--api-key")
     streaming.add_argument("--timeout-seconds", type=_positive_float, default=60.0)
     streaming.add_argument("--frame-duration-ms", type=_positive_int, default=20)
+    streaming.add_argument(
+        "--timing-mode",
+        choices=("file_upload", "paced"),
+        default="file_upload",
+        help="streaming timing contract (default: file_upload)",
+    )
+    streaming.add_argument(
+        "--realtime-factor",
+        type=_positive_float,
+        help="paced audio speed multiplier (default in paced mode: 1.0)",
+    )
     streaming.add_argument(
         "--language-mode",
         choices=("manifest", "autodetect"),
@@ -292,6 +315,12 @@ def write_streaming_artifact(result: StreamingArtifact, path: str | Path) -> Non
     _write_json_artifact(streaming_artifact_to_dict(result), path)
 
 
+def write_streaming_artifact_v2(result: StreamingArtifactV2, path: str | Path) -> None:
+    """Write a complete schema-v2 streaming result atomically."""
+
+    _write_json_artifact(streaming_artifact_v2_to_dict(result), path)
+
+
 def _run(args: argparse.Namespace) -> int:
     _validate_configuration(args)
     adapter = _build_adapter(args)
@@ -335,15 +364,21 @@ def _concurrent(args: argparse.Namespace) -> int:
 
 
 def _streaming(args: argparse.Namespace) -> int:
+    if args.timing_mode == "file_upload" and args.realtime_factor is not None:
+        raise ConfigurationError("--realtime-factor is only valid with --timing-mode paced")
+
     manifest_path = Path(args.manifest).expanduser().resolve()
     items = load_dataset_manifest(manifest_path)
+    if not items:
+        raise StreamingDatasetError("streaming dataset benchmark requires at least one item")
     if args.language_mode == "manifest" and any(item.language is not None for item in items):
         raise ConfigurationError(
             "vLLM Realtime does not support explicit manifest language tags; "
             "use --language-mode autodetect to explicitly ignore them"
         )
 
-    adapter = VLLMRealtimeAdapter(
+    adapter_type = VLLMPacedRealtimeAdapter if args.timing_mode == "paced" else VLLMRealtimeAdapter
+    adapter = adapter_type(
         args.model,
         base_url=args.base_url,
         api_key=_resolved_vllm_api_key(args),
@@ -356,14 +391,27 @@ def _streaming(args: argparse.Namespace) -> int:
         compute_type=adapter.compute_type,
         options=dict(adapter.decoding_options),
     )
-    result = run_streaming_dataset_benchmark(
-        manifest_path,
-        adapter,
-        frame_duration_ms=args.frame_duration_ms,
-        language_mode=args.language_mode,
-    )
-    artifact = build_streaming_artifact(result, adapter=adapter_info)
-    write_streaming_artifact(artifact, args.output)
+    if args.timing_mode == "paced":
+        result = asyncio.run(
+            run_paced_streaming_dataset_benchmark(
+                manifest_path,
+                adapter,
+                frame_duration_ms=args.frame_duration_ms,
+                realtime_factor=(1.0 if args.realtime_factor is None else args.realtime_factor),
+                language_mode=args.language_mode,
+            )
+        )
+        artifact = build_streaming_artifact_v2(result, adapter=adapter_info)
+        write_streaming_artifact_v2(artifact, args.output)
+    else:
+        result = run_streaming_dataset_benchmark(
+            manifest_path,
+            adapter,
+            frame_duration_ms=args.frame_duration_ms,
+            language_mode=args.language_mode,
+        )
+        artifact = build_streaming_artifact(result, adapter=adapter_info)
+        write_streaming_artifact(artifact, args.output)
     return 0
 
 
